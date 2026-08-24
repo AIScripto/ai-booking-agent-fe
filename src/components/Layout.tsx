@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Calendar, PhoneCall, LogOut, CalendarCheck } from 'lucide-react';
+import { LayoutDashboard, Calendar, PhoneCall, LogOut, CalendarCheck, BarChart3, Stethoscope } from 'lucide-react';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -17,8 +17,14 @@ export const Layout: React.FC<LayoutProps> = ({
   const menuItems = [
     { id: 'dashboard', name: 'Overview', icon: LayoutDashboard },
     { id: 'calendar', name: 'Calendar View', icon: Calendar },
+    { id: 'doctor-schedules', name: 'Doctor Schedules', icon: Stethoscope },
     { id: 'logs', name: 'Call Transcripts', icon: PhoneCall },
+    { id: 'book-online', name: 'Book Online', icon: CalendarCheck },
+    { id: 'analytics', name: 'Analytics SLA', icon: BarChart3 },
   ];
+
+
+
 
   return (
     <div className="flex min-h-screen bg-slate-950 text-slate-100 font-sans">

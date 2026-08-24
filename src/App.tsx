@@ -4,6 +4,9 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { CalendarView } from './pages/CalendarView';
 import { CallLogsView } from './pages/CallLogsView';
+import { PublicBookingPage } from './pages/PublicBookingPage';
+import { AnalyticsView } from './pages/AnalyticsView';
+import { DoctorDirectoryManager } from './pages/DoctorDirectoryManager';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -45,9 +48,16 @@ function App() {
     >
       {activeTab === 'dashboard' && <Dashboard setActiveTab={setActiveTab} />}
       {activeTab === 'calendar' && <CalendarView />}
+      {activeTab === 'doctor-schedules' && <DoctorDirectoryManager />}
       {activeTab === 'logs' && <CallLogsView />}
+      {activeTab === 'book-online' && <PublicBookingPage />}
+      {activeTab === 'analytics' && <AnalyticsView />}
     </Layout>
   );
 }
 
 export default App;
+
+
+
+

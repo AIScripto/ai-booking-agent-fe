@@ -200,7 +200,9 @@ export const CalendarView: React.FC = () => {
             <h3 className="text-sm font-bold text-slate-200 flex items-center space-x-2">
               <CalendarIcon className="w-4 h-4 text-sky-400" />
               <span>DatePicker</span>
+              {loading && <span className="text-xs text-sky-400 font-normal animate-pulse">Loading...</span>}
             </h3>
+
             {/* Native input element fallback */}
             <input
               type="date"
