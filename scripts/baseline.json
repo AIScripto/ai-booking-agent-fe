@@ -1,0 +1,10 @@
+{
+  "_comment": "Recorded technical debt. Lower these freely; NEVER raise them. See AGENTS.md §8.",
+  "_updated": "2026-08-25",
+  "no_any": 14,
+  "hardcoded_config": 0,
+  "api_boundary": 0,
+  "ui_states": 1,
+  "a11y": 0,
+  "lint_errors": 2
+}

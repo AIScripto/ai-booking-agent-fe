@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { User, Calendar, Clock, CheckCircle2, AlertCircle, PlayCircle, XCircle, FileText, Video, Check } from 'lucide-react';
 import type { IndustryVocabulary } from '../services/vocabulary';
+import { api } from '../services/api';
 
 
 export interface BookingItem {
@@ -36,20 +37,8 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
   const handleGenerateVideoLink = async (booking: BookingItem) => {
     setLoadingVideoId(booking.id);
     try {
-      const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-      const res = await fetch(`http://localhost:5000/api/v1/appointments/${booking.id}/telehealth`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-tenant-id': tenantId,
-          'x-api-key': 'supersecretapikey',
-        },
-        body: JSON.stringify({ provider: 'DAILY' }),
-      });
-
-      const result = await res.json();
-      if (result.status === 'success' && result.data?.roomUrl) {
-        const roomUrl = result.data.roomUrl;
+      const { roomUrl } = await api.createTelehealthRoom(booking.id, 'DAILY');
+      if (roomUrl) {
         navigator.clipboard.writeText(roomUrl);
         setCopiedId(booking.id);
         setTimeout(() => setCopiedId(null), 3000);
@@ -127,11 +116,10 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
             <button
               key={st}
               onClick={() => setFilterStatus(st)}
-              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${
-                filterStatus === st
-                  ? 'bg-sky-600 text-white shadow-sm'
-                  : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
-              }`}
+              className={`px-3 py-1.5 rounded-md font-medium transition-colors ${filterStatus === st
+                ? 'bg-sky-600 text-white shadow-sm'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
+                }`}
             >
               {st === 'ALL' ? 'All' : st.replace('_', ' ')}
             </button>

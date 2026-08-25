@@ -63,16 +63,13 @@ export const DoctorDirectoryManager: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-      const [brandingRes, appts] = await Promise.all([
-        fetch(`http://localhost:5000/api/v1/tenant/branding?tenant_id=${tenantId}`).then((r) => r.json()),
+      const [branding, appts] = await Promise.all([
+        api.getBranding(),
         api.getAppointments(),
       ]);
 
-      if (brandingRes.status === 'success' && brandingRes.data) {
-        if (brandingRes.data.resources) setDoctors(brandingRes.data.resources);
-        if (brandingRes.data.departments) setDepartments(brandingRes.data.departments);
-      }
+      if (branding.resources) setDoctors(branding.resources);
+      if (branding.departments) setDepartments(branding.departments);
       setAppointments(appts);
     } catch (err: any) {
       setError(err.message || 'Failed to retrieve doctor roster.');
@@ -93,29 +90,21 @@ export const DoctorDirectoryManager: React.FC = () => {
     if (!newDocName || !newDocEmail) return;
 
     try {
-      const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-      const res = await fetch('http://localhost:5000/api/v1/tenant/resources', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tenantId,
-          name: newDocName,
-          email: newDocEmail,
-          title: newDocTitle || 'Consultant Specialist',
-        }),
+      const created = await api.createResource({
+        name: newDocName,
+        email: newDocEmail,
+        title: newDocTitle || 'Consultant Specialist',
+        departmentId: newDocDeptId || undefined,
       });
 
-      const data = await res.json();
-      if (data.status === 'success' && data.data) {
-        setDoctors((prev) => [data.data, ...prev]);
-        setShowAddModal(false);
-        setNewDocName('');
-        setNewDocEmail('');
-        setNewDocTitle('');
-        setNewDocDeptId('');
-      }
+      setDoctors((prev) => [created, ...prev]);
+      setShowAddModal(false);
+      setNewDocName('');
+      setNewDocEmail('');
+      setNewDocTitle('');
+      setNewDocDeptId('');
     } catch (err: any) {
-      setError('Failed to onboard new doctor.');
+      setError(err.message || 'Failed to onboard new doctor.');
     }
   };
 
@@ -123,15 +112,10 @@ export const DoctorDirectoryManager: React.FC = () => {
     if (!window.confirm('Are you sure you want to offboard this consultant? This will remove them from active booking availability.')) return;
 
     try {
-      const res = await fetch(`http://localhost:5000/api/v1/tenant/resources/${doctorId}`, {
-        method: 'DELETE',
-      });
-      const data = await res.json();
-      if (data.status === 'success') {
-        setDoctors((prev) => prev.filter((d) => d.id !== doctorId));
-      }
+      await api.deleteResource(doctorId);
+      setDoctors((prev) => prev.filter((d) => d.id !== doctorId));
     } catch (err: any) {
-      setError('Failed to offboard doctor.');
+      setError(err.message || 'Failed to offboard doctor.');
     }
   };
 

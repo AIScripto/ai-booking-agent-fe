@@ -1,5 +1,7 @@
 import React, { useState } from 'react';
 import { KeyRound, User, CalendarCheck } from 'lucide-react';
+import { DEFAULT_TENANT_ID } from '../config/env';
+import { setTenantId } from '../services/tenant';
 
 interface LoginProps {
   onLogin: () => void;
@@ -20,7 +22,11 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
     setTimeout(() => {
       if (username === 'admin' && password === '1234') {
         localStorage.setItem('auth_token', 'mock_jwt_token_12345');
-        localStorage.setItem('tenant_id', '9eb441c7-f788-4137-8043-d4d7c3080879'); // seeded tenant UUID
+        // The tenant comes from build-time config, not a literal. Set
+        // VITE_DEFAULT_TENANT_ID in .env to point a dev build at a seeded tenant.
+        // TODO: replace this stub with the real /auth/login response, which
+        // should return the tenant alongside the token.
+        if (DEFAULT_TENANT_ID) setTenantId(DEFAULT_TENANT_ID);
         onLogin();
       } else {
         setError('Invalid username or password.');

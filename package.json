@@ -7,7 +7,10 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "verify": "./scripts/verify.sh",
+    "verify:quick": "./scripts/verify.sh --quick",
+    "typecheck": "tsc -b"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.2",

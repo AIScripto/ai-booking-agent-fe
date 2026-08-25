@@ -46,14 +46,9 @@ export const PublicBookingPage: React.FC = () => {
   const availableSlots = ['09:00 AM', '10:30 AM', '02:00 PM', '03:30 PM', '05:00 PM'];
 
   useEffect(() => {
-    const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-    fetch(`http://localhost:5000/api/v1/tenant/branding?tenant_id=${tenantId}`)
-      .then((res) => res.json())
-      .then((res) => {
-        if (res.status === 'success' && res.data?.resources) {
-          setDoctors(res.data.resources);
-        }
-      })
+    api
+      .getBranding()
+      .then((data) => setDoctors(data.resources ?? []))
       .catch((err) => console.error('[PublicBookingPage] Error fetching resources:', err));
   }, []);
 

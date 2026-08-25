@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
+import { requireTenantId } from '../services/tenant';
 import type { Appointment, CallLog } from '../services/api';
 import { useVocabulary } from '../services/vocabulary';
 import { StatusBoard } from '../components/StatusBoard';
@@ -42,8 +43,7 @@ export const Dashboard: React.FC<DashboardProps> = () => {
   const handleConnectCalendar = async () => {
     setGoogleAuthLoading(true);
     try {
-      const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-      const authUrl = await api.getGoogleAuthUrl(tenantId);
+      const authUrl = await api.getGoogleAuthUrl(requireTenantId());
       window.open(authUrl, '_blank');
     } catch (err: any) {
       alert(`OAuth Error: ${err.message}`);

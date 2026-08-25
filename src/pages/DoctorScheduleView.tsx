@@ -35,18 +35,14 @@ export const DoctorScheduleView: React.FC = () => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-
-        const [brandingRes, appts] = await Promise.all([
-          fetch(`http://localhost:5000/api/v1/tenant/branding?tenant_id=${tenantId}`).then((r) => r.json()),
+        const [branding, appts] = await Promise.all([
+          api.getBranding(),
           api.getAppointments(),
         ]);
 
-        if (brandingRes.status === 'success' && brandingRes.data?.resources) {
-          setDoctors(brandingRes.data.resources);
-          if (brandingRes.data.resources.length > 0) {
-            setSelectedDoctorId(brandingRes.data.resources[0].id);
-          }
+        if (branding.resources?.length) {
+          setDoctors(branding.resources);
+          setSelectedDoctorId(branding.resources[0].id);
         }
         setAppointments(appts);
       } catch (err: any) {

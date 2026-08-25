@@ -1,12 +1,99 @@
-const API_BASE_URL = 'http://localhost:5000/api/v1';
+// ── Network boundary ────────────────────────────────────────────────────────
+//
+// R5: every HTTP call in this app goes through this module. No component or
+// page may call `fetch` directly.
+// ────────────────────────────────────────────────────────────────────────────
 
-const getHeaders = () => {
-  const tenantId = localStorage.getItem('tenant_id') || '9eb441c7-f788-4137-8043-d4d7c3080879';
-  return {
-    'Content-Type': 'application/json',
-    'x-tenant-id': tenantId,
+import { API_BASE_URL } from '../config/env';
+import { requireTenantId } from './tenant';
+
+/**
+ * Standard headers for a tenant-scoped request.
+ *
+ * @throws {Error} when no tenant is established — see `requireTenantId`.
+ */
+const getHeaders = () => ({
+  'Content-Type': 'application/json',
+  'x-tenant-id': requireTenantId(),
+});
+
+/**
+ * Unwraps the canonical API envelope: `{ status, data }` on success,
+ * `{ status: 'error', message }` on failure.
+ *
+ * @throws {Error} carrying the server's message when `status` is `'error'`.
+ */
+async function unwrap<T>(res: Response): Promise<T> {
+  const result = await res.json();
+  if (result.status === 'error') {
+    throw new Error(result.message || `Request failed with status ${res.status}`);
+  }
+  return result.data as T;
+}
+
+/** A bookable provider. Never call this a "Doctor" in UI copy — see vocabulary.ts. */
+export interface Resource {
+  id: string;
+  name: string;
+  email: string;
+  title?: string | null;
+  departmentId?: string | null;
+}
+
+/** An organisational grouping of resources. */
+export interface Department {
+  id: string;
+  name: string;
+  code?: string;
+  description?: string;
+  buildingLocation?: string;
+  isHipaaRestricted?: boolean;
+  maxDailyBookings?: number;
+}
+
+/** A bookable service offered by the tenant. */
+export interface ServiceType {
+  id: string;
+  name: string;
+  durationMinutes?: number;
+}
+
+/**
+ * Tenant identity, white-label branding and bookable inventory.
+ * Shape mirrors `GET /api/v1/tenant/branding`.
+ */
+export interface TenantBranding {
+  tenantId: string;
+  name: string;
+  industry: string;
+  branding: Record<string, unknown> | null;
+  resources: Resource[];
+  serviceTypes: ServiceType[];
+  departments: Department[];
+}
+
+/** Industry-specific label set. Shape mirrors `GET /api/v1/tenant/vocabulary`. */
+export interface TenantVocabularyResponse {
+  tenantId: string;
+  tenantName: string;
+  industry: string;
+  vocabulary: {
+    resourceLabel: string;
+    customerLabel: string;
+    serviceLabel: string;
+    statusInProgress: string;
   };
-};
+}
+
+/** Video consultation providers the backend can provision a room with. */
+export type TelehealthProvider = 'DAILY' | 'ZOOM' | 'GOOGLE_MEET';
+
+/** A provisioned video consultation room. */
+export interface TelehealthRoom {
+  roomUrl: string;
+  provider?: TelehealthProvider;
+  expiresAt?: string | null;
+}
 
 export interface Appointment {
   id: string;
@@ -118,5 +205,92 @@ export const api = {
       throw new Error(result.message);
     }
     return result.authUrl;
+  },
+
+  // ── Tenant ────────────────────────────────────────────────────────────────
+
+  /**
+   * Tenant branding, resources (providers) and departments.
+   *
+   * Public: also serves the white-labelled booking surface, which has no
+   * signed-in user, so the tenant travels as a query parameter.
+   *
+   * @throws {Error} when no tenant is established or the API returns an error.
+   */
+  async getBranding(): Promise<TenantBranding> {
+    const res = await fetch(
+      `${API_BASE_URL}/tenant/branding?tenant_id=${encodeURIComponent(requireTenantId())}`
+    );
+    return unwrap<TenantBranding>(res);
+  },
+
+  /**
+   * Industry-specific label set for the tenant.
+   *
+   * @see src/services/vocabulary.ts — never hardcode a domain noun in the UI.
+   * @throws {Error} when no tenant is established or the API returns an error.
+   */
+  async getVocabulary(): Promise<TenantVocabularyResponse> {
+    const res = await fetch(
+      `${API_BASE_URL}/tenant/vocabulary?tenant_id=${encodeURIComponent(requireTenantId())}`
+    );
+    return unwrap<TenantVocabularyResponse>(res);
+  },
+
+  // ── Resources (providers) ─────────────────────────────────────────────────
+
+  /**
+   * Onboards a new bookable resource for the tenant.
+   *
+   * @security Tenant-scoped: the server derives ownership from the tenant header.
+   * @throws {Error} when no tenant is established or the API returns an error.
+   */
+  async createResource(input: {
+    name: string;
+    email: string;
+    title?: string;
+    departmentId?: string;
+  }): Promise<Resource> {
+    const res = await fetch(`${API_BASE_URL}/tenant/resources`, {
+      method: 'POST',
+      headers: getHeaders(),
+      body: JSON.stringify({ tenantId: requireTenantId(), ...input }),
+    });
+    return unwrap<Resource>(res);
+  },
+
+  /**
+   * Offboards a resource, removing it from active booking availability.
+   *
+   * @security Tenant-scoped: the server derives ownership from the tenant header.
+   * @throws {Error} when no tenant is established or the API returns an error.
+   */
+  async deleteResource(resourceId: string): Promise<void> {
+    const res = await fetch(
+      `${API_BASE_URL}/tenant/resources/${encodeURIComponent(resourceId)}`,
+      { method: 'DELETE', headers: getHeaders() }
+    );
+    await unwrap<unknown>(res);
+  },
+
+  // ── Telehealth ────────────────────────────────────────────────────────────
+
+  /**
+   * Creates a video consultation room for an appointment and returns its URL.
+   *
+   * @security Tenant-scoped via the `x-tenant-id` header. This endpoint does
+   *   NOT take an API key — the webhook key belongs to the voice provider and
+   *   must never be shipped in a browser bundle.
+   * @throws {Error} when no tenant is established or the API returns an error.
+   */
+  async createTelehealthRoom(
+    appointmentId: string,
+    provider: TelehealthProvider = 'DAILY'
+  ): Promise<TelehealthRoom> {
+    const res = await fetch(
+      `${API_BASE_URL}/appointments/${encodeURIComponent(appointmentId)}/telehealth`,
+      { method: 'POST', headers: getHeaders(), body: JSON.stringify({ provider }) }
+    );
+    return unwrap<TelehealthRoom>(res);
   },
 };
