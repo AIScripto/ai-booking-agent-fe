@@ -23,6 +23,7 @@ env:
   # Vite bakes env vars at `npm run build`, NOT at docker build time. Passing
   # this as a Docker build-arg does nothing — it must be set here.
   VITE_API_BASE_URL: /api/v1
+  VITE_DEFAULT_TENANT_ID: "9eb441c7-f788-4137-8043-d4d7c3080879"
 
 jobs:
   quality:
