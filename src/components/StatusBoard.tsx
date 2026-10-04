@@ -33,19 +33,25 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [loadingVideoId, setLoadingVideoId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [videoError, setVideoError] = useState<{ id: string; message: string } | null>(null);
 
   const handleGenerateVideoLink = async (booking: BookingItem) => {
     setLoadingVideoId(booking.id);
+    setVideoError(null);
     try {
       const { roomUrl } = await api.createTelehealthRoom(booking.id, 'DAILY');
-      if (roomUrl) {
-        navigator.clipboard.writeText(roomUrl);
-        setCopiedId(booking.id);
-        setTimeout(() => setCopiedId(null), 3000);
-        window.open(roomUrl, '_blank');
-      }
+      navigator.clipboard.writeText(roomUrl);
+      setCopiedId(booking.id);
+      setTimeout(() => setCopiedId(null), 3000);
+      window.open(roomUrl, '_blank', 'noopener,noreferrer');
     } catch (err) {
-      console.error('[StatusBoard] Error generating video room:', err);
+      // Rooms are provisioned per booking and there is no shared fallback room,
+      // so a failure here means there is no link — say so instead of appearing
+      // to have opened one.
+      setVideoError({
+        id: booking.id,
+        message: err instanceof Error ? err.message : 'Could not start the video room.',
+      });
     } finally {
       setLoadingVideoId(null);
     }
@@ -174,15 +180,34 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
                     <td className="py-3.5 px-4 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-2">
                         <button
+                          type="button"
                           onClick={() => handleGenerateVideoLink(b)}
                           disabled={loadingVideoId === b.id}
-                          className="p-1.5 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors flex items-center gap-1"
-                          title="Generate & Join Daily.co Video Room"
+                          className={`p-1.5 rounded-lg border transition-colors flex items-center gap-1 disabled:opacity-60 disabled:cursor-not-allowed ${
+                            videoError?.id === b.id
+                              ? 'bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border-rose-500/30'
+                              : 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border-emerald-500/20'
+                          }`}
+                          aria-label={
+                            videoError?.id === b.id
+                              ? `Video room failed: ${videoError.message}. Activate to try again.`
+                              : 'Generate and join video room'
+                          }
+                          title={
+                            videoError?.id === b.id
+                              ? `${videoError.message} — click to try again.`
+                              : 'Generate & Join Daily.co Video Room'
+                          }
                         >
                           {copiedId === b.id ? (
-                            <Check className="w-4 h-4 text-emerald-300" />
+                            <Check className="w-4 h-4 text-emerald-300" aria-hidden="true" />
+                          ) : videoError?.id === b.id ? (
+                            <AlertCircle className="w-4 h-4" aria-hidden="true" />
                           ) : (
-                            <Video className={`w-4 h-4 ${loadingVideoId === b.id ? 'animate-spin' : ''}`} />
+                            <Video
+                              className={`w-4 h-4 ${loadingVideoId === b.id ? 'animate-spin' : ''}`}
+                              aria-hidden="true"
+                            />
                           )}
                         </button>
                         {onSelectBooking && (

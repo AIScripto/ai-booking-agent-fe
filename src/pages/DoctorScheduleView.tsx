@@ -31,6 +31,34 @@ export const DoctorScheduleView: React.FC = () => {
   const [error, setError] = useState<string>('');
   const [blockoutActive, setBlockoutActive] = useState<Record<string, boolean>>({});
 
+  // Telehealth join state, keyed by appointment so one failing row cannot blank
+  // out the others.
+  const [joiningApptId, setJoiningApptId] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<{ id: string; message: string } | null>(null);
+
+  /**
+   * Provisions this appointment's own video room and opens it.
+   *
+   * The room is created per appointment on demand — there is no shared standing
+   * room to fall back to, so a failure must surface to the user rather than
+   * silently sending them somewhere else.
+   */
+  const handleJoinTelehealth = async (appointmentId: string) => {
+    setJoiningApptId(appointmentId);
+    setJoinError(null);
+    try {
+      const { roomUrl } = await api.createTelehealthRoom(appointmentId, 'DAILY');
+      window.open(roomUrl, '_blank', 'noopener,noreferrer');
+    } catch (err) {
+      setJoinError({
+        id: appointmentId,
+        message: err instanceof Error ? err.message : 'Could not start the video room.',
+      });
+    } finally {
+      setJoiningApptId(null);
+    }
+  };
+
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
@@ -222,18 +250,27 @@ export const DoctorScheduleView: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
-                      <CheckCircle2 className="w-3.5 h-3.5" /> Scheduled
-                    </span>
-                    <a
-                      href="https://demo.daily.co/telehealth-consultation"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg transition-colors flex items-center gap-1.5"
-                    >
-                      <Video className="w-3.5 h-3.5" /> Join Telehealth Video
-                    </a>
+                  <div className="flex flex-col items-start sm:items-end gap-1.5 text-xs">
+                    <div className="flex items-center gap-2">
+                      <span className="px-2.5 py-1 rounded-full font-semibold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1">
+                        <CheckCircle2 className="w-3.5 h-3.5" aria-hidden="true" /> Scheduled
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleJoinTelehealth(appt.id)}
+                        disabled={joiningApptId === appt.id}
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+                      >
+                        <Video className="w-3.5 h-3.5" aria-hidden="true" />
+                        {joiningApptId === appt.id ? 'Starting…' : 'Join Telehealth Video'}
+                      </button>
+                    </div>
+                    {joinError?.id === appt.id && (
+                      <p role="alert" className="text-rose-400 max-w-xs sm:text-right">
+                        {joinError.message}{' '}
+                        <span className="text-slate-500">Press Join to try again.</span>
+                      </p>
+                    )}
                   </div>
                 </div>
               );

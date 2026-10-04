@@ -10,6 +10,13 @@ checked by the person or agent doing the work.
 > between a change and a broken screen. Do not skip it, and do not claim a flow works if
 > you only typechecked it.
 
+**Skills that operate against this document:**
+[`review-frontend-code`](../.agents/skills/review-frontend-code/SKILL.md) walks the checklist
+as an audit · [`write-frontend-test`](../.agents/skills/write-frontend-test/SKILL.md) covers
+§3 and the framework setup ·
+[`scaffold-ui-component`](../.agents/skills/scaffold-ui-component/SKILL.md) builds new UI to
+this bar.
+
 ---
 
 ## 1. Gate — automated
@@ -95,8 +102,8 @@ State in your summary **which flows you exercised and which you could not.**
 
 ## Known debt
 
-Recorded in `scripts/baseline.json` as of 2026-08-25. The gate tolerates these counts and
-fails on any increase. Worst-first — fix on contact.
+Recorded in `scripts/baseline.json`, re-audited **2026-08-27**. The gate tolerates these
+counts and fails on any increase. Worst-first — fix on contact.
 
 ### 🔴 P1 — `CallTranscriptDrawer` violates rules-of-hooks (crash)
 
@@ -110,29 +117,25 @@ const [saved, setSaved] = useState<boolean>(false);
 
 React throws **"Rendered fewer hooks than expected"** when the drawer goes from open
 (`booking` set) to closed (`booking` null) — i.e. every time a user closes it after opening.
-This is the app's 2 oxlint errors. Fix: move both `useState` above the guard.
+This is still present as of 2026-08-27 and accounts for the `lint_errors` baseline of **2**.
+Fix: move both `useState` above the guard and return `null` after them.
 
-### 🔴 P1 — the production build cannot reach the API
+### ✅ Resolved since the last audit — do not re-report
 
-Six inline `fetch()` calls hardcode `http://localhost:5000/api/v1`, and `api.ts` does too:
+Two entries previously listed here are fixed. Verified 2026-08-27:
 
-| File | Calls |
-| :-- | :-- |
-| `pages/DoctorDirectoryManager.tsx` | 3 |
-| `components/StatusBoard.tsx` | 1 |
-| `pages/PublicBookingPage.tsx` | 1 |
-| `pages/DoctorScheduleView.tsx` | 1 |
+- **Hardcoded API host.** No `localhost:5000` remains in `src/`, and no inline `fetch` is
+  left in `components/` or `pages/`. `src/config/env.ts` is now the sole reader of
+  `import.meta.env` and defaults `API_BASE_URL` to the relative `/api/v1`, which nginx
+  proxies. Baselines `hardcoded_config` and `api_boundary` are both **0** — they must never
+  go back up.
+- **Hardcoded fallback tenant UUID.** `src/services/tenant.ts` is now the single resolution
+  point and returns `null` rather than a literal, so an unknown tenant surfaces as "not
+  signed in".
 
-A deployed bundle calls the user's own machine and fails. Fix: introduce
-`VITE_API_BASE_URL`, route all six through `api.ts`, and add the placeholder to
-`.env.example`.
-
-### 🟠 P2 — hardcoded fallback tenant UUID (baseline 17)
-
-`api.ts` falls back to a literal tenant UUID when `localStorage.tenant_id` is absent, and
-the same UUID is hardcoded across 8 files. A signed-out or misconfigured client silently
-reads **one specific tenant's** data. A missing tenant must be an error state, not a
-default.
+  One residual: `getTenantId()` still falls back to `DEFAULT_TENANT_ID`. That is empty in
+  production by design, but if `VITE_DEFAULT_TENANT_ID` is ever set in a production build it
+  reintroduces a shared cross-tenant fallback. Keep it unset outside development.
 
 ### 🟠 P2 — no test framework
 
@@ -146,11 +149,12 @@ Concentrated in `DoctorDirectoryManager` (3), `CalendarView` (3), `PublicBooking
 `Dashboard` (2). Mostly untyped API responses — fix by exporting shared response types from
 `api.ts` and reusing them.
 
-### 🟡 P3 — swallowed errors and lint warnings (baseline 1)
+### ✅ Swallowed errors — cleared (baseline now 0)
 
-Two `catch (err) {}` blocks in `DoctorDirectoryManager` (lines 117, 133) discard the error,
-so a failed onboard/offboard shows the user nothing. Plus a missing `useEffect` dependency
-(`fetchAppointments`) in `CalendarView`.
+The last one was `StatusBoard.handleGenerateVideoLink`, which only `console.error`d a failed
+telehealth room. Fixed 2026-08-27: the failure now renders on the row's button with a retry.
+The guard reports **0** and the baseline is locked there — any new silent `catch` fails the
+gate.
 
 ### 🟡 P3 — no router
 
