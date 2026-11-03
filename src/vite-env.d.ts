@@ -11,8 +11,6 @@
 interface ImportMetaEnv {
   /** Base URL for the API, e.g. `/api/v1` behind nginx. */
   readonly VITE_API_BASE_URL?: string;
-  /** Development convenience: pre-seeds the tenant so you can skip login. */
-  readonly VITE_DEFAULT_TENANT_ID?: string;
 }
 
 interface ImportMeta {

@@ -7,6 +7,8 @@ import { CallLogsView } from './pages/CallLogsView';
 import { PublicBookingPage } from './pages/PublicBookingPage';
 import { AnalyticsView } from './pages/AnalyticsView';
 import { DoctorDirectoryManager } from './pages/DoctorDirectoryManager';
+import { api } from './services/api';
+import { AUTH_EXPIRED_EVENT, clearSession, getToken, setSession } from './services/session';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -14,17 +16,45 @@ function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // Check if user has an active session token stored locally
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      setIsLoggedIn(true);
+    // A stored token is only a claim: ask the server whether it still works (and refresh the
+    // stored user) before showing anything. A dead or old fake token sends us to the login page.
+    const token = getToken();
+    if (!token) {
+      setCheckingAuth(false);
+      return;
     }
-    setCheckingAuth(false);
+
+    let cancelled = false;
+    api
+      .getMe()
+      .then((user) => {
+        if (cancelled) return;
+        setSession(token, user);
+        setIsLoggedIn(true);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        clearSession();
+        setIsLoggedIn(false);
+      })
+      .finally(() => {
+        if (!cancelled) setCheckingAuth(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    // The API client raises this when the server rejects the token (expired or user disabled).
+    const onExpired = () => setIsLoggedIn(false);
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
   }, []);
 
   const handleLogout = () => {
-    localStorage.removeItem('auth_token');
-    localStorage.removeItem('tenant_id');
+    clearSession();
     setIsLoggedIn(false);
   };
 

@@ -5,17 +5,40 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import { API_BASE_URL } from '../config/env';
-import { requireTenantId } from './tenant';
+import { AUTH_EXPIRED_EVENT, clearSession, getToken } from './session';
+import type { SessionUser } from './session';
 
 /**
- * Standard headers for a tenant-scoped request.
+ * Sends a request with the login token.
  *
- * @throws {Error} when no tenant is established — see `requireTenantId`.
+ * The tenant is never sent: the server reads it from the verified token. If there is no token,
+ * or the server answers 401, the session is cleared and the app returns to the login screen.
+ *
+ * @throws {Error} when not signed in or the session has expired.
  */
-const getHeaders = () => ({
-  'Content-Type': 'application/json',
-  'x-tenant-id': requireTenantId(),
-});
+async function request(url: string, init: RequestInit = {}): Promise<Response> {
+  const token = getToken();
+  if (!token) {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    throw new Error('Please sign in.');
+  }
+
+  const res = await fetch(url, {
+    ...init,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(init.headers ?? {}),
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  if (res.status === 401) {
+    clearSession();
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+    throw new Error('Your session has expired. Please sign in again.');
+  }
+  return res;
+}
 
 /**
  * Unwraps the canonical API envelope: `{ status, data }` on success,
@@ -129,14 +152,39 @@ export interface CallLog {
 }
 
 export const api = {
+  // ── Sign-in ───────────────────────────────────────────────────────────────
+
+  /**
+   * Signs in with email and password. Uses plain `fetch` because there is no token yet.
+   *
+   * @throws {Error} with the server's message (wrong credentials, too many attempts).
+   */
+  async login(email: string, password: string): Promise<{ token: string; user: SessionUser }> {
+    const res = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    return unwrap<{ token: string; user: SessionUser }>(res);
+  },
+
+  /**
+   * The signed-in user. Used at start-up to check that a stored token still works.
+   *
+   * @throws {Error} when the token is missing, expired or the user is disabled.
+   */
+  async getMe(): Promise<SessionUser> {
+    const res = await request(`${API_BASE_URL}/auth/me`);
+    return unwrap<SessionUser>(res);
+  },
+
   /**
    * Fetches appointments, optionally filtered by a specific date (YYYY-MM-DD).
    */
   async getAppointments(date?: string): Promise<Appointment[]> {
     const url = date ? `${API_BASE_URL}/appointments?date=${date}` : `${API_BASE_URL}/appointments`;
-    const res = await fetch(url, {
-      method: 'GET',
-      headers: getHeaders(),
+    const res = await request(url, {
+      method: 'GET'
     });
     const result = await res.json();
     if (result.status === 'error') {
@@ -154,9 +202,8 @@ export const api = {
     customerPhone: string;
     customerEmail?: string | null;
   }): Promise<Appointment> {
-    const res = await fetch(`${API_BASE_URL}/appointments`, {
+    const res = await request(`${API_BASE_URL}/appointments`, {
       method: 'POST',
-      headers: getHeaders(),
       body: JSON.stringify(data),
     });
     const result = await res.json();
@@ -170,9 +217,8 @@ export const api = {
    * Cancels an appointment.
    */
   async cancelAppointment(id: string): Promise<void> {
-    const res = await fetch(`${API_BASE_URL}/appointments/${id}`, {
-      method: 'DELETE',
-      headers: getHeaders(),
+    const res = await request(`${API_BASE_URL}/appointments/${id}`, {
+      method: 'DELETE'
     });
     const result = await res.json();
     if (result.status === 'error') {
@@ -184,9 +230,8 @@ export const api = {
    * Fetches the call logs for the tenant.
    */
   async getCallLogs(): Promise<CallLog[]> {
-    const res = await fetch(`${API_BASE_URL}/appointments/logs`, {
-      method: 'GET',
-      headers: getHeaders(),
+    const res = await request(`${API_BASE_URL}/appointments/logs`, {
+      method: 'GET'
     });
     const result = await res.json();
     if (result.status === 'error') {
@@ -199,9 +244,8 @@ export const api = {
    * Fetches one call log including transcript and payload.
    */
   async getCallLog(id: string): Promise<CallLog> {
-    const res = await fetch(`${API_BASE_URL}/appointments/logs/${encodeURIComponent(id)}`, {
-      method: 'GET',
-      headers: getHeaders(),
+    const res = await request(`${API_BASE_URL}/appointments/logs/${encodeURIComponent(id)}`, {
+      method: 'GET'
     });
     const result = await res.json();
     if (result.status === 'error') {
@@ -211,10 +255,10 @@ export const api = {
   },
 
   /**
-   * Gets the Google OAuth consent redirect URL.
+   * Gets the Google OAuth consent redirect URL for the signed-in admin's own tenant.
    */
-  async getGoogleAuthUrl(tenantId: string): Promise<string> {
-    const res = await fetch(`${API_BASE_URL}/auth/google?tenant_id=${tenantId}`, {
+  async getGoogleAuthUrl(): Promise<string> {
+    const res = await request(`${API_BASE_URL}/auth/google`, {
       method: 'GET',
     });
     const result = await res.json();
@@ -229,15 +273,12 @@ export const api = {
   /**
    * Tenant branding, resources (providers) and departments.
    *
-   * Public: also serves the white-labelled booking surface, which has no
-   * signed-in user, so the tenant travels as a query parameter.
+   * For the signed-in user's own tenant (the server reads it from the token).
    *
-   * @throws {Error} when no tenant is established or the API returns an error.
+   * @throws {Error} when not signed in or the API returns an error.
    */
   async getBranding(): Promise<TenantBranding> {
-    const res = await fetch(
-      `${API_BASE_URL}/tenant/branding?tenant_id=${encodeURIComponent(requireTenantId())}`
-    );
+    const res = await request(`${API_BASE_URL}/tenant/branding`);
     return unwrap<TenantBranding>(res);
   },
 
@@ -245,12 +286,10 @@ export const api = {
    * Industry-specific label set for the tenant.
    *
    * @see src/services/vocabulary.ts — never hardcode a domain noun in the UI.
-   * @throws {Error} when no tenant is established or the API returns an error.
+   * @throws {Error} when not signed in or the API returns an error.
    */
   async getVocabulary(): Promise<TenantVocabularyResponse> {
-    const res = await fetch(
-      `${API_BASE_URL}/tenant/vocabulary?tenant_id=${encodeURIComponent(requireTenantId())}`
-    );
+    const res = await request(`${API_BASE_URL}/tenant/vocabulary`);
     return unwrap<TenantVocabularyResponse>(res);
   },
 
@@ -259,8 +298,8 @@ export const api = {
   /**
    * Onboards a new bookable resource for the tenant.
    *
-   * @security Tenant-scoped: the server derives ownership from the tenant header.
-   * @throws {Error} when no tenant is established or the API returns an error.
+   * @security Tenant-scoped: the server derives ownership from the login token. Admins only.
+   * @throws {Error} when not signed in or the API returns an error.
    */
   async createResource(input: {
     name: string;
@@ -268,10 +307,9 @@ export const api = {
     title?: string;
     departmentId?: string;
   }): Promise<Resource> {
-    const res = await fetch(`${API_BASE_URL}/tenant/resources`, {
+    const res = await request(`${API_BASE_URL}/tenant/resources`, {
       method: 'POST',
-      headers: getHeaders(),
-      body: JSON.stringify({ tenantId: requireTenantId(), ...input }),
+      body: JSON.stringify(input),
     });
     return unwrap<Resource>(res);
   },
@@ -279,13 +317,13 @@ export const api = {
   /**
    * Offboards a resource, removing it from active booking availability.
    *
-   * @security Tenant-scoped: the server derives ownership from the tenant header.
-   * @throws {Error} when no tenant is established or the API returns an error.
+   * @security Tenant-scoped: the server derives ownership from the login token. Admins only.
+   * @throws {Error} when not signed in or the API returns an error.
    */
   async deleteResource(resourceId: string): Promise<void> {
-    const res = await fetch(
+    const res = await request(
       `${API_BASE_URL}/tenant/resources/${encodeURIComponent(resourceId)}`,
-      { method: 'DELETE', headers: getHeaders() }
+      { method: 'DELETE' }
     );
     await unwrap<unknown>(res);
   },
@@ -295,18 +333,18 @@ export const api = {
   /**
    * Creates a video consultation room for an appointment and returns its URL.
    *
-   * @security Tenant-scoped via the `x-tenant-id` header. This endpoint does
+   * @security Tenant-scoped via the login token. This endpoint does
    *   NOT take an API key — the webhook key belongs to the voice provider and
    *   must never be shipped in a browser bundle.
-   * @throws {Error} when no tenant is established or the API returns an error.
+   * @throws {Error} when not signed in or the API returns an error.
    */
   async createTelehealthRoom(
     appointmentId: string,
     provider: TelehealthProvider = 'DAILY'
   ): Promise<TelehealthRoom> {
-    const res = await fetch(
+    const res = await request(
       `${API_BASE_URL}/appointments/${encodeURIComponent(appointmentId)}/telehealth`,
-      { method: 'POST', headers: getHeaders(), body: JSON.stringify({ provider }) }
+      { method: 'POST', body: JSON.stringify({ provider }) }
     );
     return unwrap<TelehealthRoom>(res);
   },

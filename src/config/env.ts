@@ -17,13 +17,3 @@
  */
 export const API_BASE_URL: string = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 
-/**
- * Optional development seed for the active tenant.
- *
- * Empty in production: the tenant is established at login and read from storage.
- * Setting `VITE_DEFAULT_TENANT_ID` lets a developer load a tenant-scoped page
- * without signing in first.
- *
- * @see src/services/tenant.ts — resolution order lives there, not here.
- */
-export const DEFAULT_TENANT_ID: string = import.meta.env.VITE_DEFAULT_TENANT_ID ?? '';

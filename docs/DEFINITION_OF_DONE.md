@@ -129,13 +129,15 @@ Two entries previously listed here are fixed. Verified 2026-08-27:
   `import.meta.env` and defaults `API_BASE_URL` to the relative `/api/v1`, which nginx
   proxies. Baselines `hardcoded_config` and `api_boundary` are both **0** — they must never
   go back up.
-- **Hardcoded fallback tenant UUID.** `src/services/tenant.ts` is now the single resolution
-  point and returns `null` rather than a literal, so an unknown tenant surfaces as "not
-  signed in".
+- **Hardcoded fallback tenant UUID and fake login.** Superseded 2026-11-03 by real
+  authentication. `src/services/tenant.ts` and `VITE_DEFAULT_TENANT_ID` are gone, and so is the
+  hardcoded `admin` login. The browser no longer chooses a tenant: it signs in with an email
+  and password (`POST /auth/login`), keeps the returned token in `src/services/session.ts`, and
+  `src/services/api.ts` sends it as `Authorization: Bearer`. The server reads the tenant and
+  role from the verified token. A 401 clears the session and returns to the login page.
 
-  One residual: `getTenantId()` still falls back to `DEFAULT_TENANT_ID`. That is empty in
-  production by design, but if `VITE_DEFAULT_TENANT_ID` is ever set in a production build it
-  reintroduces a shared cross-tenant fallback. Keep it unset outside development.
+  Residual: the token is kept in `localStorage`, so a script injected into the page could read
+  it. Keep third-party scripts off this app. An httpOnly cookie is a possible later step.
 
 ### 🟠 P2 — no test framework
 

@@ -1,38 +1,34 @@
 import React, { useState } from 'react';
-import { KeyRound, User, CalendarCheck } from 'lucide-react';
-import { DEFAULT_TENANT_ID } from '../config/env';
-import { setTenantId } from '../services/tenant';
+import { KeyRound, Mail, CalendarCheck } from 'lucide-react';
+import { api } from '../services/api';
+import { setSession } from '../services/session';
 
 interface LoginProps {
   onLogin: () => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLogin }) => {
-  const [username, setUsername] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setLoading(true);
 
-    // Initial mock login logic
-    setTimeout(() => {
-      if (username === 'admin' && password === '1234') {
-        localStorage.setItem('auth_token', 'mock_jwt_token_12345');
-        // The tenant comes from build-time config, not a literal. Set
-        // VITE_DEFAULT_TENANT_ID in .env to point a dev build at a seeded tenant.
-        // TODO: replace this stub with the real /auth/login response, which
-        // should return the tenant alongside the token.
-        if (DEFAULT_TENANT_ID) setTenantId(DEFAULT_TENANT_ID);
-        onLogin();
-      } else {
-        setError('Invalid username or password.');
-      }
+    try {
+      // The server checks the password and returns a signed token. It also decides the
+      // tenant and role, so nothing about them is chosen or stored by this page.
+      const { token, user } = await api.login(email.trim(), password);
+      setSession(token, user);
+      onLogin();
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Could not sign in. Please try again.');
+    } finally {
       setLoading(false);
-    }, 600);
+    }
   };
 
   return (
@@ -47,34 +43,36 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           <div className="inline-flex bg-sky-500/10 p-3 rounded-2xl text-sky-400 mb-4 border border-sky-500/10">
             <CalendarCheck className="w-8 h-8" />
           </div>
-          <h2 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-sky-400 to-cyan-400 bg-clip-text text-transparent">
+          <h1 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-sky-400 to-cyan-400 bg-clip-text text-transparent">
             Voice Agent Booking
-          </h2>
+          </h1>
           <p className="text-slate-400 text-sm mt-2 font-medium">
             Sign in to manage your appointments & call logs
           </p>
         </div>
 
         {error && (
-          <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3 rounded-xl text-xs font-semibold mb-6">
+          <div role="alert" className="bg-rose-500/10 border border-rose-500/20 text-rose-400 px-4 py-3 rounded-xl text-xs font-semibold mb-6">
             {error}
           </div>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* Username */}
+          {/* Email */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">Username</label>
+            <label htmlFor="login-email" className="text-xs text-slate-400 font-bold uppercase tracking-wider">Email</label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                <User className="w-5 h-5" />
+                <Mail className="w-5 h-5" aria-hidden="true" />
               </span>
               <input
-                type="text"
+                id="login-email"
+                type="email"
+                autoComplete="username"
                 required
-                placeholder="admin"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
+                placeholder="you@clinic.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm font-medium focus:outline-none focus:border-sky-500/50 transition-colors"
               />
             </div>
@@ -82,15 +80,17 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
 
           {/* Password */}
           <div className="space-y-2">
-            <label className="text-xs text-slate-400 font-bold uppercase tracking-wider">Password</label>
+            <label htmlFor="login-password" className="text-xs text-slate-400 font-bold uppercase tracking-wider">Password</label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center text-slate-500">
-                <KeyRound className="w-5 h-5" />
+                <KeyRound className="w-5 h-5" aria-hidden="true" />
               </span>
               <input
+                id="login-password"
                 type="password"
+                autoComplete="current-password"
                 required
-                placeholder="••••"
+                placeholder="••••••••••••"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="w-full pl-11 pr-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-slate-100 placeholder-slate-600 text-sm font-medium focus:outline-none focus:border-sky-500/50 transition-colors"
@@ -108,9 +108,6 @@ export const Login: React.FC<LoginProps> = ({ onLogin }) => {
           </button>
         </form>
 
-        <div className="mt-8 pt-6 border-t border-slate-800 text-center text-xs text-slate-500 font-medium">
-          Default Tenant ID: <span className="font-mono text-[10px] text-slate-400">9eb441c7-f788...</span>
-        </div>
       </div>
     </div>
   );
