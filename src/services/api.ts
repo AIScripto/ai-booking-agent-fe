@@ -116,8 +116,10 @@ export interface CallLog {
   callSid: string | null;
   duration: number | null;
   status: string;
-  transcript: string | null;
-  payload: any;
+  /** Only present when a single log is fetched with getCallLog. */
+  transcript?: string | null;
+  /** Only present when a single log is fetched with getCallLog. */
+  payload?: any;
   customerName: string | null;
   customerPhone: string | null;
   customerEmail: string | null;
@@ -191,6 +193,21 @@ export const api = {
       throw new Error(result.message);
     }
     return result.data || [];
+  },
+
+  /**
+   * Fetches one call log including transcript and payload.
+   */
+  async getCallLog(id: string): Promise<CallLog> {
+    const res = await fetch(`${API_BASE_URL}/appointments/logs/${encodeURIComponent(id)}`, {
+      method: 'GET',
+      headers: getHeaders(),
+    });
+    const result = await res.json();
+    if (result.status === 'error') {
+      throw new Error(result.message);
+    }
+    return result.data;
   },
 
   /**

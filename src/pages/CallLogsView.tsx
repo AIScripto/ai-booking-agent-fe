@@ -29,9 +29,23 @@ export const CallLogsView: React.FC = () => {
     fetchLogs();
   }, []);
 
-  const handleOpenDetails = (log: CallLog) => {
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState('');
+
+  const handleOpenDetails = async (log: CallLog) => {
+    // Show the list data at once, then load transcript and payload.
     setSelectedLog(log);
     setShowJson(false);
+    setDetailError('');
+    setDetailLoading(true);
+    try {
+      const full = await api.getCallLog(log.id);
+      setSelectedLog((current) => (current && current.id === log.id ? full : current));
+    } catch (err: unknown) {
+      setDetailError(err instanceof Error && err.message ? err.message : 'Failed to load call details.');
+    } finally {
+      setDetailLoading(false);
+    }
   };
 
   // Helper to render status badges
@@ -256,7 +270,15 @@ export const CallLogsView: React.FC = () => {
               {!showJson ? (
                 <div className="space-y-4">
                   <h4 className="text-xs text-slate-400 font-bold uppercase tracking-wider">Voice Transcription</h4>
-                  {selectedLog.transcript ? (
+                  {detailLoading ? (
+                    <div className="bg-slate-950/20 border border-dashed border-slate-850 p-6 rounded-xl text-center text-xs text-slate-500 font-medium">
+                      Loading transcript...
+                    </div>
+                  ) : detailError ? (
+                    <div role="alert" className="bg-red-950/20 border border-red-900/40 p-6 rounded-xl text-center text-xs text-red-400 font-medium">
+                      {detailError}
+                    </div>
+                  ) : selectedLog.transcript ? (
                     <div className="bg-slate-950/40 border border-slate-850 p-5 rounded-xl text-sm text-slate-200 leading-relaxed max-h-[250px] overflow-y-auto whitespace-pre-wrap">
                       {selectedLog.transcript}
                     </div>
