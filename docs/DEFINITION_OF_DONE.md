@@ -132,12 +132,17 @@ Two entries previously listed here are fixed. Verified 2026-08-27:
 - **Hardcoded fallback tenant UUID and fake login.** Superseded 2026-11-03 by real
   authentication. `src/services/tenant.ts` and `VITE_DEFAULT_TENANT_ID` are gone, and so is the
   hardcoded `admin` login. The browser no longer chooses a tenant: it signs in with an email
-  and password (`POST /auth/login`), keeps the returned token in `src/services/session.ts`, and
-  `src/services/api.ts` sends it as `Authorization: Bearer`. The server reads the tenant and
-  role from the verified token. A 401 clears the session and returns to the login page.
+  and password (`POST /auth/login`). The server returns a short-lived access token (15 minutes),
+  which `src/services/session.ts` keeps IN MEMORY only, and sets a long-lived refresh token in an
+  httpOnly, SameSite=Strict cookie that JavaScript cannot read. `src/services/api.ts` sends the
+  access token as `Authorization: Bearer`, and renews it from the cookie (`POST /auth/refresh`)
+  when it is missing (page reload) or rejected (401). The server reads the tenant and role from
+  the verified token. If renewal fails, the session is cleared and the login page is shown.
 
-  Residual: the token is kept in `localStorage`, so a script injected into the page could read
-  it. Keep third-party scripts off this app. An httpOnly cookie is a possible later step.
+  Nothing is stored in `localStorage`. Sign-out ends the user's sessions on every device.
+  Residual: the refresh token is stateless (no server-side list), so a stolen refresh cookie works
+  until it expires (7 days, 30 days at most from sign-in) or the user's row changes (password
+  reset, deactivation, sign-out). Server-side rotation with reuse detection needs a database table.
 
 ### 🟠 P2 — no test framework
 

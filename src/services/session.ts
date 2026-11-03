@@ -1,19 +1,21 @@
 // ── Signed-in session ───────────────────────────────────────────────────────
 //
-// Single place that holds the login token and the signed-in user for this browser.
-// The tenant is NOT chosen here or sent by the browser: the server reads it from the
-// verified token. `user.tenantId` is for display only.
+// Holds the short-lived access token and the signed-in user, IN MEMORY ONLY.
 //
-// The token lives in localStorage, so any script running on the page could read it.
-// Keep third-party scripts off this app. Moving it to an httpOnly cookie is a later step.
+// Nothing is written to localStorage: a script injected into the page cannot find a token there.
+// The long-lived credential is the refresh token, which the server keeps in an httpOnly cookie
+// that JavaScript cannot read. After a page reload the memory is empty, and api.ts asks the
+// server for a new access token using that cookie (see `restoreSession`).
+//
+// The tenant is never chosen or sent by the browser: the server reads it from the verified
+// token. `user.tenantId` is for display only.
 // ────────────────────────────────────────────────────────────────────────────
 
-const TOKEN_KEY = 'auth_token';
-const USER_KEY = 'auth_user';
-// Keys used by the old fake login. Removed on sign-in and sign-out so nothing stale stays.
-const LEGACY_KEYS = ['tenant_id'];
+// Keys used by earlier versions (the fake login and the first real login). Removed so that
+// nothing stale stays in the browser.
+const LEGACY_KEYS = ['auth_token', 'auth_user', 'tenant_id'];
 
-/** Dispatched on `window` when the server says the token is no longer valid. */
+/** Dispatched on `window` when the session has ended and the user must sign in again. */
 export const AUTH_EXPIRED_EVENT = 'auth:expired';
 
 export type UserRole = 'ADMIN' | 'PROVIDER' | 'FRONT_DESK' | 'PATIENT';
@@ -26,48 +28,37 @@ export interface SessionUser {
   tenantId: string;
 }
 
-function read(key: string): string | null {
+let accessToken: string | null = null;
+let sessionUser: SessionUser | null = null;
+
+function removeLegacyKeys(): void {
   try {
-    return localStorage.getItem(key);
+    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
   } catch {
-    return null;
+    // Storage blocked (private window): nothing to remove.
   }
 }
 
-/** The login token, or `null` when not signed in. */
+/** The current access token, or `null` when there is none in memory. */
 export function getToken(): string | null {
-  return read(TOKEN_KEY);
+  return accessToken;
 }
 
-/** The signed-in user stored at login, or `null`. */
+/** The signed-in user, or `null`. */
 export function getSessionUser(): SessionUser | null {
-  const raw = read(USER_KEY);
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as SessionUser;
-  } catch {
-    return null;
-  }
+  return sessionUser;
 }
 
-/** Stores the session returned by a successful login. */
+/** Stores the session returned by login or refresh. */
 export function setSession(token: string, user: SessionUser): void {
-  try {
-    localStorage.setItem(TOKEN_KEY, token);
-    localStorage.setItem(USER_KEY, JSON.stringify(user));
-    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // Storage blocked (private window): the user simply stays signed out.
-  }
+  accessToken = token;
+  sessionUser = user;
+  removeLegacyKeys();
 }
 
-/** Forgets the session. Called on sign-out and when the token stops working. */
+/** Forgets the session in memory. Called on sign-out and when the server ends the session. */
 export function clearSession(): void {
-  try {
-    localStorage.removeItem(TOKEN_KEY);
-    localStorage.removeItem(USER_KEY);
-    LEGACY_KEYS.forEach((key) => localStorage.removeItem(key));
-  } catch {
-    // Nothing to clear if storage is blocked.
-  }
+  accessToken = null;
+  sessionUser = null;
+  removeLegacyKeys();
 }

@@ -8,7 +8,7 @@ import { PublicBookingPage } from './pages/PublicBookingPage';
 import { AnalyticsView } from './pages/AnalyticsView';
 import { DoctorDirectoryManager } from './pages/DoctorDirectoryManager';
 import { api } from './services/api';
-import { AUTH_EXPIRED_EVENT, clearSession, getToken, setSession } from './services/session';
+import { AUTH_EXPIRED_EVENT } from './services/session';
 
 function App() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -16,26 +16,17 @@ function App() {
   const [checkingAuth, setCheckingAuth] = useState(true);
 
   useEffect(() => {
-    // A stored token is only a claim: ask the server whether it still works (and refresh the
-    // stored user) before showing anything. A dead or old fake token sends us to the login page.
-    const token = getToken();
-    if (!token) {
-      setCheckingAuth(false);
-      return;
-    }
-
+    // Nothing is kept in the browser's storage. If the refresh cookie is still valid the server
+    // gives us a new access token and the user; otherwise we show the login page.
     let cancelled = false;
     api
-      .getMe()
+      .restoreSession()
       .then((user) => {
-        if (cancelled) return;
-        setSession(token, user);
-        setIsLoggedIn(true);
+        if (!cancelled) setIsLoggedIn(Boolean(user));
       })
       .catch(() => {
-        if (cancelled) return;
-        clearSession();
-        setIsLoggedIn(false);
+        // Server not reachable: show the login page rather than a blank screen.
+        if (!cancelled) setIsLoggedIn(false);
       })
       .finally(() => {
         if (!cancelled) setCheckingAuth(false);
@@ -53,8 +44,8 @@ function App() {
     return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired);
   }, []);
 
-  const handleLogout = () => {
-    clearSession();
+  const handleLogout = async () => {
+    await api.logout();
     setIsLoggedIn(false);
   };
 

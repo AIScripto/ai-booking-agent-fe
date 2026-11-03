@@ -5,37 +5,95 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import { API_BASE_URL } from '../config/env';
-import { AUTH_EXPIRED_EVENT, clearSession, getToken } from './session';
+import { AUTH_EXPIRED_EVENT, clearSession, getSessionUser, getToken, setSession } from './session';
 import type { SessionUser } from './session';
 
-/**
- * Sends a request with the login token.
- *
- * The tenant is never sent: the server reads it from the verified token. If there is no token,
- * or the server answers 401, the session is cleared and the app returns to the login screen.
- *
- * @throws {Error} when not signed in or the session has expired.
- */
-async function request(url: string, init: RequestInit = {}): Promise<Response> {
-  const token = getToken();
-  if (!token) {
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    throw new Error('Please sign in.');
-  }
+const CSRF_HEADER = { 'X-Requested-With': 'fetch' };
 
-  const res = await fetch(url, {
+// Several requests can find the token expired at once; they share one refresh.
+let refreshing: Promise<boolean> | null = null;
+
+/**
+ * Asks the server for a new access token using the refresh cookie (the browser sends it by
+ * itself; this code never sees it). Returns false when the server says the session is over.
+ *
+ * @throws {Error} when the server cannot be reached (the session is kept, so the user can retry).
+ */
+function refreshSession(): Promise<boolean> {
+  refreshing ??= (async () => {
+    let res: Response;
+    try {
+      res = await fetch(`${API_BASE_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADER },
+      });
+    } catch {
+      throw new Error('Could not reach the server. Please check your connection.');
+    }
+
+    if (res.status === 401 || res.status === 400) {
+      clearSession();
+      return false;
+    }
+    if (!res.ok) {
+      throw new Error('Could not renew your session. Please try again.');
+    }
+
+    const result = await res.json();
+    if (result.status !== 'success') {
+      clearSession();
+      return false;
+    }
+    setSession(result.data.token, result.data.user);
+    return true;
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
+/** Ends the session in the app and tells the screens to show the login page. */
+function endSession(): void {
+  clearSession();
+  window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+}
+
+function send(url: string, init: RequestInit): Promise<Response> {
+  return fetch(url, {
     ...init,
     headers: {
       'Content-Type': 'application/json',
       ...(init.headers ?? {}),
-      Authorization: `Bearer ${token}`,
+      Authorization: `Bearer ${getToken()}`,
     },
   });
+}
 
+/**
+ * Sends a request with the access token.
+ *
+ * The tenant is never sent: the server reads it from the verified token. If there is no token
+ * in memory (after a page reload) or the server answers 401 (the 15-minute token ran out), the
+ * token is renewed once from the refresh cookie and the request is repeated. If that fails the
+ * session is over and the app returns to the login screen.
+ *
+ * @throws {Error} when not signed in or the session has ended.
+ */
+async function request(url: string, init: RequestInit = {}): Promise<Response> {
+  if (!getToken() && !(await refreshSession())) {
+    endSession();
+    throw new Error('Please sign in.');
+  }
+
+  let res = await send(url, init);
   if (res.status === 401) {
-    clearSession();
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-    throw new Error('Your session has expired. Please sign in again.');
+    if (await refreshSession()) {
+      res = await send(url, init);
+    }
+    if (res.status === 401) {
+      endSession();
+      throw new Error('Your session has expired. Please sign in again.');
+    }
   }
   return res;
 }
@@ -156,6 +214,7 @@ export const api = {
 
   /**
    * Signs in with email and password. Uses plain `fetch` because there is no token yet.
+   * The server also sets the refresh cookie on this response; the app never handles it.
    *
    * @throws {Error} with the server's message (wrong credentials, too many attempts).
    */
@@ -176,6 +235,34 @@ export const api = {
   async getMe(): Promise<SessionUser> {
     const res = await request(`${API_BASE_URL}/auth/me`);
     return unwrap<SessionUser>(res);
+  },
+
+  /**
+   * Called when the app starts. After a page reload there is no token in memory, so this asks the
+   * server for one using the refresh cookie. Returns the signed-in user, or `null` when the
+   * cookie is missing or no longer valid (show the login page).
+   *
+   * @throws {Error} when the server cannot be reached.
+   */
+  async restoreSession(): Promise<SessionUser | null> {
+    return (await refreshSession()) ? getSessionUser() : null;
+  },
+
+  /**
+   * Signs out: the server clears the cookie and ends the user's sessions on every device.
+   * The local session is cleared even if the server cannot be reached.
+   */
+  async logout(): Promise<void> {
+    try {
+      await fetch(`${API_BASE_URL}/auth/logout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...CSRF_HEADER },
+      });
+    } catch {
+      // Offline: the cookie will expire by itself. Still sign out here.
+    } finally {
+      clearSession();
+    }
   },
 
   /**
