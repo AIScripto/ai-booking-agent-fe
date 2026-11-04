@@ -1,20 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useVocabulary } from '../services/vocabulary';
 import { api } from '../services/api';
-import type { Appointment } from '../services/api';
-import type { DoctorResource } from './PublicBookingPage';
+import type { Resource as DoctorResource } from '../services/api';
 import {
   Stethoscope,
   Search,
   Plus,
-  Lock,
-  Calendar,
-  Clock,
   UserCheck,
-  ShieldAlert,
   LayoutGrid,
   List,
-  CheckCircle2,
   AlertCircle,
   X,
   Mail,
@@ -39,7 +33,6 @@ export const DoctorDirectoryManager: React.FC = () => {
 
   const [doctors, setDoctors] = useState<DoctorResource[]>([]);
   const [departments, setDepartments] = useState<Department[]>([]);
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string>('');
 
@@ -47,7 +40,6 @@ export const DoctorDirectoryManager: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedDept, setSelectedDept] = useState<string>('ALL');
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [blockoutActive, setBlockoutActive] = useState<Record<string, boolean>>({});
 
   // Add Doctor Modal State
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
@@ -63,26 +55,15 @@ export const DoctorDirectoryManager: React.FC = () => {
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [branding, appts] = await Promise.all([
-        api.getBranding(),
-        api.getAppointments(),
-      ]);
-
-      if (branding.resources) setDoctors(branding.resources);
-      if (branding.departments) setDepartments(branding.departments);
-      setAppointments(appts);
-    } catch (err: any) {
-      setError(err.message || 'Failed to retrieve doctor roster.');
+      const branding = await api.getBranding();
+      setDoctors(branding.resources ?? []);
+      setDepartments(branding.departments ?? []);
+      setError('');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to load the providers.');
     } finally {
       setLoading(false);
     }
-  };
-
-  const handleToggleBlockout = (doctorId: string) => {
-    setBlockoutActive((prev) => ({
-      ...prev,
-      [doctorId]: !prev[doctorId],
-    }));
   };
 
   const handleAddDoctorSubmit = async (e: React.FormEvent) => {
@@ -93,7 +74,7 @@ export const DoctorDirectoryManager: React.FC = () => {
       const created = await api.createResource({
         name: newDocName,
         email: newDocEmail,
-        title: newDocTitle || 'Consultant Specialist',
+        title: newDocTitle || undefined,
         departmentId: newDocDeptId || undefined,
       });
 
@@ -103,8 +84,8 @@ export const DoctorDirectoryManager: React.FC = () => {
       setNewDocEmail('');
       setNewDocTitle('');
       setNewDocDeptId('');
-    } catch (err: any) {
-      setError(err.message || 'Failed to onboard new doctor.');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to add the provider.');
     }
   };
 
@@ -114,8 +95,8 @@ export const DoctorDirectoryManager: React.FC = () => {
     try {
       await api.deleteResource(doctorId);
       setDoctors((prev) => prev.filter((d) => d.id !== doctorId));
-    } catch (err: any) {
-      setError(err.message || 'Failed to offboard doctor.');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to remove the provider.');
     }
   };
 
@@ -127,7 +108,7 @@ export const DoctorDirectoryManager: React.FC = () => {
       doc.email.toLowerCase().includes(searchQuery.toLowerCase());
 
     if (selectedDept === 'ALL') return matchesSearch;
-    return matchesSearch && doc.title?.toLowerCase().includes(selectedDept.toLowerCase());
+    return matchesSearch && doc.departmentId === selectedDept;
   });
 
   if (loading) {
@@ -144,13 +125,13 @@ export const DoctorDirectoryManager: React.FC = () => {
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div>
           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-sky-500/10 text-sky-400 border border-sky-500/20 mb-2">
-            <Stethoscope className="w-3.5 h-3.5" /> Enterprise Multi-Department Directory
+            <Stethoscope className="w-3.5 h-3.5" aria-hidden="true" /> Directory
           </span>
           <h1 className="text-2xl font-extrabold text-slate-100">
             {vocabulary.resourceLabel} & Department Management
           </h1>
           <p className="text-xs text-slate-400 mt-1">
-            Manage {doctors.length} consultants across {departments.length} departments with HIPAA compliance controls.
+            {doctors.length} {vocabulary.resourceLabel.toLowerCase()}{doctors.length === 1 ? '' : 's'} in {departments.length} department{departments.length === 1 ? '' : 's'}.
           </p>
         </div>
 
@@ -200,9 +181,9 @@ export const DoctorDirectoryManager: React.FC = () => {
           {departments.map((dept) => (
             <button
               key={dept.id}
-              onClick={() => setSelectedDept(dept.name)}
+              onClick={() => setSelectedDept(dept.id)}
               className={`px-3 py-1.5 rounded-lg font-medium transition-colors whitespace-nowrap ${
-                selectedDept === dept.name
+                selectedDept === dept.id
                   ? 'bg-sky-600 text-white shadow-sm'
                   : 'text-slate-400 hover:text-slate-200 hover:bg-slate-800/50'
               }`}
@@ -255,151 +236,85 @@ export const DoctorDirectoryManager: React.FC = () => {
         ))}
       </div>
 
-      {/* Main Roster Display: Grid View vs Table View */}
+      {/* Roster: only what the system knows about a provider (name, email, title, department) */}
       {filteredDoctors.length === 0 ? (
         <div className="bg-slate-900 border border-slate-800 rounded-2xl py-12 text-center text-slate-400 text-xs space-y-2">
-          <UserCheck className="w-8 h-8 text-slate-600 mx-auto" />
-          <p>No {vocabulary.resourceLabel.toLowerCase()}s match your filter criteria.</p>
+          <UserCheck className="w-8 h-8 text-slate-600 mx-auto" aria-hidden="true" />
+          <p>
+            {doctors.length === 0
+              ? `No ${vocabulary.resourceLabel.toLowerCase()}s have been added yet.`
+              : `No ${vocabulary.resourceLabel.toLowerCase()}s match your filter.`}
+          </p>
         </div>
       ) : viewMode === 'grid' ? (
-        /* GRID CARDS VIEW */
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {filteredDoctors.map((doc) => {
-            const isBlocked = !!blockoutActive[doc.id];
-            const docBookingsCount = appointments.length;
-
-            return (
-              <div
-                key={doc.id}
-                className={`bg-slate-900 border rounded-2xl p-6 shadow-xl space-y-5 transition-all relative ${
-                  isBlocked ? 'border-rose-500/40 bg-rose-950/10' : 'border-slate-800 hover:border-slate-700'
-                }`}
-              >
-                {/* Top Avatar & Name */}
-                <div className="flex items-start justify-between gap-3">
-                  <div className="flex items-center gap-3">
-                    <div className="relative">
-                      <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-base">
-                        <Stethoscope className="w-6 h-6" />
-                      </div>
-                      <span
-                        className={`absolute -bottom-0.5 -right-0.5 w-3.5 h-3.5 rounded-full border-2 border-slate-900 ${
-                          isBlocked ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'
-                        }`}
-                      />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-slate-100 text-sm">{doc.name}</h3>
-                      <p className="text-xs text-slate-400">{doc.title || 'Specialist Consultant'}</p>
-                    </div>
+          {filteredDoctors.map((doc) => (
+            <div key={doc.id} className="bg-slate-900 border border-slate-800 hover:border-slate-700 rounded-2xl p-6 shadow-xl space-y-4 transition-all">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/20 text-sky-400 flex items-center justify-center">
+                    <Stethoscope className="w-6 h-6" aria-hidden="true" />
+                  </div>
+                  <div>
+                    <h3 className="font-bold text-slate-100 text-sm">{doc.name}</h3>
+                    {doc.title && <p className="text-xs text-slate-400">{doc.title}</p>}
                   </div>
                 </div>
-
-                {/* Status & Work Hours Details */}
-                <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-2 text-xs">
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-sky-400" /> Duty Hours:
-                    </span>
-                    <span className="font-mono text-slate-200 font-semibold">09:00 - 17:00</span>
-                  </div>
-                  <div className="flex items-center justify-between text-slate-400">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3.5 h-3.5 text-sky-400" /> Active Slots:
-                    </span>
-                    <span className="font-mono text-sky-400 font-bold">{docBookingsCount} Booked</span>
-                  </div>
+                <button
+                  type="button"
+                  onClick={() => handleOffboardDoctor(doc.id)}
+                  className="p-2.5 bg-slate-950 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 rounded-xl transition-all"
+                  aria-label={`Remove ${doc.name}`}
+                  title={`Remove ${doc.name}`}
+                >
+                  <Trash2 className="w-4 h-4" aria-hidden="true" />
+                </button>
+              </div>
+              <div className="bg-slate-950 border border-slate-800/80 rounded-xl p-3 space-y-2 text-xs">
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Email</span>
+                  <span className="font-mono text-slate-200 truncate ml-3">{doc.email}</span>
                 </div>
-
-                {/* Emergency Blockout Trigger & Offboard Action */}
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleToggleBlockout(doc.id)}
-                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors ${
-                      isBlocked
-                        ? 'bg-rose-600 hover:bg-rose-500 text-white shadow-lg'
-                        : 'bg-slate-950 hover:bg-slate-800 text-slate-300 border border-slate-800'
-                    }`}
-                  >
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    <span>{isBlocked ? 'Cancel Blockout' : 'Emergency Time-Off'}</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => handleOffboardDoctor(doc.id)}
-                    className="p-2.5 bg-slate-950 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 rounded-xl transition-all"
-                    title="Offboard / Delete Doctor"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                <div className="flex items-center justify-between text-slate-400">
+                  <span>Department</span>
+                  <span className="text-slate-200">{departments.find((d) => d.id === doc.departmentId)?.name ?? '—'}</span>
                 </div>
               </div>
-            );
-          })}
+            </div>
+          ))}
         </div>
       ) : (
-        /* COMPACT TABLE VIEW */
         <div className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden shadow-xl">
           <table className="w-full text-left text-xs text-slate-300">
             <thead className="bg-slate-950 text-slate-400 font-semibold uppercase tracking-wider border-b border-slate-800">
               <tr>
-                <th className="py-3.5 px-4">{vocabulary.resourceLabel} Name</th>
-                <th className="py-3.5 px-4">Specialty / Title</th>
-                <th className="py-3.5 px-4">Duty Schedule</th>
-                <th className="py-3.5 px-4">Status</th>
+                <th className="py-3.5 px-4">{vocabulary.resourceLabel}</th>
+                <th className="py-3.5 px-4">Title</th>
+                <th className="py-3.5 px-4">Department</th>
                 <th className="py-3.5 px-4 text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/60">
-              {filteredDoctors.map((doc) => {
-                const isBlocked = !!blockoutActive[doc.id];
-                return (
-                  <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
-                    <td className="py-3.5 px-4 font-bold text-slate-100 flex items-center gap-2">
-                      <Stethoscope className="w-4 h-4 text-sky-400" />
-                      <div>
-                        <div>{doc.name}</div>
-                        <div className="text-[10px] text-slate-500 font-mono">{doc.email}</div>
-                      </div>
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-300">{doc.title || 'Consultant'}</td>
-                    <td className="py-3.5 px-4 font-mono text-sky-400">09:00 - 17:00</td>
-                    <td className="py-3.5 px-4">
-                      {isBlocked ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-500/10 text-rose-400 border border-rose-500/20">
-                          <Lock className="w-3 h-3" /> Emergency OOO
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-                          <CheckCircle2 className="w-3 h-3" /> On Duty
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-3.5 px-4 text-right flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => handleToggleBlockout(doc.id)}
-                        className={`px-3 py-1 rounded-lg font-semibold text-xs transition-colors ${
-                          isBlocked
-                            ? 'bg-rose-600 text-white'
-                            : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
-                        }`}
-                      >
-                        {isBlocked ? 'Cancel Blockout' : 'Emergency Time-Off'}
-                      </button>
-
-                      <button
-                        onClick={() => handleOffboardDoctor(doc.id)}
-                        className="p-1 rounded-lg bg-slate-950 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 transition-all"
-                        title="Offboard Doctor"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
+              {filteredDoctors.map((doc) => (
+                <tr key={doc.id} className="hover:bg-slate-800/40 transition-colors">
+                  <td className="py-3.5 px-4 font-bold text-slate-100">
+                    <div>{doc.name}</div>
+                    <div className="text-[10px] text-slate-500 font-mono">{doc.email}</div>
+                  </td>
+                  <td className="py-3.5 px-4 text-slate-300">{doc.title ?? '—'}</td>
+                  <td className="py-3.5 px-4 text-slate-300">{departments.find((d) => d.id === doc.departmentId)?.name ?? '—'}</td>
+                  <td className="py-3.5 px-4 text-right">
+                    <button
+                      onClick={() => handleOffboardDoctor(doc.id)}
+                      className="p-1 rounded-lg bg-slate-950 hover:bg-rose-600/20 text-slate-400 hover:text-rose-400 border border-slate-800 hover:border-rose-500/40 transition-all"
+                      aria-label={`Remove ${doc.name}`}
+                      title={`Remove ${doc.name}`}
+                    >
+                      <Trash2 className="w-3.5 h-3.5" aria-hidden="true" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
         </div>
@@ -428,7 +343,7 @@ export const DoctorDirectoryManager: React.FC = () => {
                     required
                     value={newDocName}
                     onChange={(e) => setNewDocName(e.target.value)}
-                    placeholder="e.g. Dr. Gregory House"
+                    placeholder="Full name"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                 </div>
@@ -443,7 +358,7 @@ export const DoctorDirectoryManager: React.FC = () => {
                     required
                     value={newDocEmail}
                     onChange={(e) => setNewDocEmail(e.target.value)}
-                    placeholder="gregory.house@citycaremedical.com"
+                    placeholder="name@example.com"
                     className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2.5 text-slate-200 focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                 </div>

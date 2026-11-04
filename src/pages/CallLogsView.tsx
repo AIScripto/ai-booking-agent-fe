@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
 import type { CallLog } from '../services/api';
+import { useVocabulary } from '../services/vocabulary';
+import { formatDateTime } from '../services/time';
 import { Phone, Eye, Calendar, Clock, X, Code, User, Mail } from 'lucide-react';
 
 export const CallLogsView: React.FC = () => {
+  const { vocabulary, timeZone } = useVocabulary();
   const [logs, setLogs] = useState<CallLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -18,8 +21,8 @@ export const CallLogsView: React.FC = () => {
     try {
       const data = await api.getCallLogs();
       setLogs(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch call logs.');
+    } catch (err: unknown) {
+      setError(err instanceof Error && err.message ? err.message : 'Failed to fetch call logs.');
     } finally {
       setLoading(false);
     }
@@ -102,7 +105,7 @@ export const CallLogsView: React.FC = () => {
               <thead>
                 <tr className="text-xs text-slate-500 font-bold border-b border-slate-800">
                   <th className="pb-3 pr-4">Timestamp</th>
-                  <th className="pb-3 pr-4">Patient</th>
+                  <th className="pb-3 pr-4">{vocabulary.customerLabel}</th>
                   <th className="pb-3 pr-4">Session ID</th>
                   <th className="pb-3 pr-4">Call Purpose Summary</th>
                   <th className="pb-3 pr-4">Status</th>
@@ -112,14 +115,17 @@ export const CallLogsView: React.FC = () => {
               <tbody className="divide-y divide-slate-850">
                 {logs.map((log) => {
                   const date = new Date(log.createdAt);
+                  // Shown in the business's time zone (the times are stored in UTC).
                   const formattedDate = date.toLocaleDateString('en-US', {
                     month: 'short',
                     day: 'numeric',
                     year: 'numeric',
+                    timeZone,
                   });
                   const formattedTime = date.toLocaleTimeString('en-US', {
                     hour: 'numeric',
                     minute: '2-digit',
+                    timeZone,
                   });
 
                   return (
@@ -144,7 +150,7 @@ export const CallLogsView: React.FC = () => {
                         {log.callSid ? `${log.callSid.substring(0, 8)}...` : 'N/A'}
                       </td>
                       <td className="py-4 pr-4 max-w-xs truncate text-xs text-slate-350">
-                        {log.purpose || (log.status === 'completed' ? 'Booking inquiry' : 'Active Voice Call')}
+                        {log.purpose || <span className="text-slate-500 italic">No summary recorded</span>}
                       </td>
                       <td className="py-4 pr-4">
                         {renderStatusBadge(log.status)}
@@ -192,7 +198,7 @@ export const CallLogsView: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <Calendar className="w-4 h-4 text-slate-400" />
                   <span className="text-xs text-slate-300 font-semibold">
-                    {new Date(selectedLog.createdAt).toLocaleString()}
+                    {formatDateTime(selectedLog.createdAt, timeZone)}
                   </span>
                 </div>
                 <div className="flex items-center space-x-2">
@@ -206,7 +212,7 @@ export const CallLogsView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Patient Details & Purpose Cards */}
+              {/* Caller details & purpose cards */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {/* Patient Profile */}
                 <div className="bg-slate-950/40 border border-slate-850 p-4 rounded-xl space-y-2.5">
@@ -240,7 +246,7 @@ export const CallLogsView: React.FC = () => {
                     <span>Call Purpose & Summary</span>
                   </h4>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    {selectedLog.purpose || (selectedLog.status === 'completed' ? 'The user inquired about scheduling or listing dental appointments.' : 'Active ongoing call, final summary pending.')}
+                    {selectedLog.purpose || 'No summary was recorded for this call.'}
                   </p>
                 </div>
               </div>

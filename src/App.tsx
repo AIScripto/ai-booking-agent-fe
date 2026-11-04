@@ -4,7 +4,7 @@ import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { CalendarView } from './pages/CalendarView';
 import { CallLogsView } from './pages/CallLogsView';
-import { PublicBookingPage } from './pages/PublicBookingPage';
+import { NewBookingPage } from './pages/NewBookingPage';
 import { AnalyticsView } from './pages/AnalyticsView';
 import { DoctorDirectoryManager } from './pages/DoctorDirectoryManager';
 import { api } from './services/api';
@@ -71,7 +71,7 @@ function App() {
       {activeTab === 'calendar' && <CalendarView />}
       {activeTab === 'doctor-schedules' && <DoctorDirectoryManager />}
       {activeTab === 'logs' && <CallLogsView />}
-      {activeTab === 'book-online' && <PublicBookingPage />}
+      {activeTab === 'book-online' && <NewBookingPage />}
       {activeTab === 'analytics' && <AnalyticsView />}
     </Layout>
   );

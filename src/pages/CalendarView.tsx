@@ -1,23 +1,33 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../services/api';
-import type { Appointment } from '../services/api';
+import type { Appointment, AvailableSlots } from '../services/api';
+import { useVocabulary } from '../services/vocabulary';
+import { formatDateLong, formatDateTime, timeKey, todayKey, weekdayOf, zonedTimeToUtc } from '../services/time';
 import { Plus, Trash2, Calendar as CalendarIcon, User, Phone, Mail, X, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export const CalendarView: React.FC = () => {
-  const [selectedDate, setSelectedDate] = useState<string>(() => {
-    const today = new Date();
-    return today.toISOString().split('T')[0];
-  });
+  // All times are shown and booked in the business's time zone (times are stored in UTC).
+  const { timeZone, businessHours, error: settingsError } = useVocabulary();
+
+  const [pickedDate, setPickedDate] = useState<string>('');
+  const selectedDate = pickedDate || todayKey(timeZone);
 
   const [appointments, setAppointments] = useState<Appointment[]>([]);
+  // Which times can really be booked (appointments plus Google Calendar), from the server.
+  const [availability, setAvailability] = useState<AvailableSlots | null>(null);
+  const [availabilityError, setAvailabilityError] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  // Mini-Calendar State
+  // Mini-Calendar State (the month being shown follows the selected date)
   const [currentMonth, setCurrentMonth] = useState<Date>(() => {
-    const today = new Date(selectedDate);
-    return new Date(today.getFullYear(), today.getMonth(), 1);
+    const [y, m] = todayKey(Intl.DateTimeFormat().resolvedOptions().timeZone).split('-').map(Number);
+    return new Date(y, m - 1, 1);
   });
+  useEffect(() => {
+    const [y, m] = selectedDate.split('-').map(Number);
+    setCurrentMonth(new Date(y, m - 1, 1));
+  }, [selectedDate]);
 
   // Modal State
   const [showModal, setShowModal] = useState(false);
@@ -31,49 +41,58 @@ export const CalendarView: React.FC = () => {
   // Filter State: 'all' | 'available' | 'booked'
   const [filter, setFilter] = useState<'all' | 'available' | 'booked'>('all');
 
-  // Fetch appointments for the selected day
-  const fetchAppointments = async () => {
+  // Fetch the day's appointments and the day's free times
+  const fetchDay = async () => {
     setLoading(true);
     setError('');
-    try {
-      const data = await api.getAppointments(selectedDate);
-      setAppointments(data);
-    } catch (err: any) {
-      setError(err.message || 'Failed to retrieve appointments.');
-    } finally {
-      setLoading(false);
+    setAvailabilityError('');
+    const [appointmentResult, availabilityResult] = await Promise.allSettled([
+      api.getAppointments(selectedDate),
+      api.getAvailableSlots(selectedDate),
+    ]);
+    if (appointmentResult.status === 'fulfilled') {
+      setAppointments(appointmentResult.value);
+    } else {
+      setAppointments([]);
+      const reason: unknown = appointmentResult.reason;
+      setError(reason instanceof Error && reason.message ? reason.message : 'Failed to retrieve appointments.');
     }
+    if (availabilityResult.status === 'fulfilled') {
+      setAvailability(availabilityResult.value);
+    } else {
+      setAvailability(null);
+      const reason: unknown = availabilityResult.reason;
+      setAvailabilityError(reason instanceof Error && reason.message ? reason.message : 'Could not check which times are free.');
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
-    fetchAppointments();
+    fetchDay();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate]);
 
-  // Find appointment matching a specific slot time on the selected date
-  const getAppointmentForSlot = (slotTime: string) => {
-    return appointments.find((appt) => {
-      const apptDate = new Date(appt.appointmentDateTime);
-      const apptHour = String(apptDate.getHours()).padStart(2, '0');
-      const apptMin = String(apptDate.getMinutes()).padStart(2, '0');
-      return `${apptHour}:${apptMin}` === slotTime;
-    });
-  };
+  // Find the appointment that starts at a specific slot time on the selected date
+  const getAppointmentForSlot = (slotTime: string) =>
+    appointments.find((appt) => timeKey(appt.appointmentDateTime, timeZone) === slotTime);
 
-  // Generate 30-minute slots between 9:00 AM and 5:00 PM (16 slots)
+  // Times the server says can be booked right now.
+  const freeTimes = new Set((availability?.slots ?? []).map((s) => timeKey(s.iso, timeZone)));
+  const canCheckFreeTimes = availability !== null && !availability.unavailable;
+
+  // 30-minute rows across the business's opening hours (from the server). Nothing on a closed day.
   const timeSlots: string[] = [];
-  const startHour = 9;
-  const endHour = 17;
-  for (let hour = startHour; hour < endHour; hour++) {
-    timeSlots.push(`${String(hour).padStart(2, '0')}:00`);
-    timeSlots.push(`${String(hour).padStart(2, '0')}:30`);
+  if (businessHours && businessHours.days.includes(weekdayOf(selectedDate))) {
+    const [startH, startM] = businessHours.start.split(':').map(Number);
+    const [endH, endM] = businessHours.end.split(':').map(Number);
+    for (let minutes = startH * 60 + startM; minutes + 30 <= endH * 60 + endM; minutes += 30) {
+      timeSlots.push(`${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`);
+    }
   }
 
-  // Dynamically add any booked appointments that fall outside standard working hours
+  // Add any booked appointment that falls outside the opening hours, so it is never hidden
   appointments.forEach((appt) => {
-    const apptDate = new Date(appt.appointmentDateTime);
-    const apptHour = String(apptDate.getHours()).padStart(2, '0');
-    const apptMin = String(apptDate.getMinutes()).padStart(2, '0');
-    const slotStr = `${apptHour}:${apptMin}`;
+    const slotStr = timeKey(appt.appointmentDateTime, timeZone);
     if (!timeSlots.includes(slotStr)) {
       timeSlots.push(slotStr);
     }
@@ -90,7 +109,7 @@ export const CalendarView: React.FC = () => {
   const filteredSlots = timeSlots.filter((slot) => {
     const appointment = getAppointmentForSlot(slot);
     if (filter === 'available') {
-      return !appointment;
+      return !appointment && freeTimes.has(slot);
     }
     if (filter === 'booked') {
       return !!appointment;
@@ -132,7 +151,7 @@ export const CalendarView: React.FC = () => {
     const yyyy = day.getFullYear();
     const mm = String(day.getMonth() + 1).padStart(2, '0');
     const dd = String(day.getDate()).padStart(2, '0');
-    setSelectedDate(`${yyyy}-${mm}-${dd}`);
+    setPickedDate(`${yyyy}-${mm}-${dd}`);
   };
 
   const handleOpenBookModal = (slotTime: string) => {
@@ -150,7 +169,8 @@ export const CalendarView: React.FC = () => {
     setBookingLoading(true);
 
     try {
-      const dateTimeIso = new Date(`${selectedDate}T${modalTime}:00.000Z`).toISOString();
+      // The clicked time is in the business's zone, so convert it to the right UTC instant.
+      const dateTimeIso = zonedTimeToUtc(selectedDate, modalTime, timeZone).toISOString();
       await api.createAppointment({
         dateTime: dateTimeIso,
         customerName,
@@ -159,9 +179,10 @@ export const CalendarView: React.FC = () => {
       });
 
       setShowModal(false);
-      fetchAppointments();
-    } catch (err: any) {
-      setBookingError(err.message || 'Failed to book appointment.');
+      fetchDay();
+    } catch (err: unknown) {
+      setBookingError(err instanceof Error && err.message ? err.message : 'Failed to book appointment.');
+      fetchDay(); // the time may have been taken meanwhile
     } finally {
       setBookingLoading(false);
     }
@@ -174,9 +195,9 @@ export const CalendarView: React.FC = () => {
 
     try {
       await api.cancelAppointment(id);
-      fetchAppointments();
-    } catch (err: any) {
-      alert(`Cancellation failed: ${err.message}`);
+      fetchDay();
+    } catch (err: unknown) {
+      setError(`Cancellation failed: ${err instanceof Error ? err.message : 'unknown error'}`);
     }
   };
 
@@ -186,9 +207,22 @@ export const CalendarView: React.FC = () => {
   return (
     <div className="space-y-6 font-sans">
       {/* Errors notifications */}
-      {error && (
-        <div className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm font-semibold">
-          {error}
+      {(error || settingsError) && (
+        <div role="alert" className="bg-rose-500/10 border border-rose-500/20 text-rose-400 p-4 rounded-xl text-sm font-semibold flex items-center justify-between gap-4">
+          <span>{error || settingsError}</span>
+          <button onClick={fetchDay} className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-semibold">
+            Try again
+          </button>
+        </div>
+      )}
+      {availabilityError && (
+        <div role="alert" className="bg-amber-500/10 border border-amber-500/20 text-amber-300 p-3 rounded-xl text-xs font-semibold">
+          {availabilityError} Free times cannot be shown, so booking is turned off for now.
+        </div>
+      )}
+      {availability?.unavailable && (
+        <div role="alert" className="bg-amber-500/10 border border-amber-500/20 text-amber-300 p-3 rounded-xl text-xs font-semibold">
+          The calendar cannot be checked right now, so free times cannot be shown and booking is turned off for now.
         </div>
       )}
 
@@ -207,7 +241,8 @@ export const CalendarView: React.FC = () => {
             <input
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => e.target.value && setPickedDate(e.target.value)}
+              aria-label="Choose a date"
               className="bg-slate-950 border border-slate-800 rounded px-1.5 py-0.5 text-[10px] text-slate-350 focus:outline-none"
             />
           </div>
@@ -251,7 +286,7 @@ export const CalendarView: React.FC = () => {
 
                 const dayString = `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`;
                 const isSelected = dayString === selectedDate;
-                const isToday = new Date().toDateString() === day.toDateString();
+                const isToday = dayString === todayKey(timeZone);
 
                 return (
                   <button
@@ -276,12 +311,7 @@ export const CalendarView: React.FC = () => {
           <div className="bg-slate-950/60 rounded-xl p-3 border border-slate-850 text-center">
             <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Browsing Date</span>
             <p className="text-xs font-semibold text-slate-300 mt-1">
-              {new Date(selectedDate).toLocaleDateString('en-US', {
-                weekday: 'long',
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric',
-              })}
+              {formatDateLong(selectedDate)}
             </p>
           </div>
         </div>
@@ -338,7 +368,11 @@ export const CalendarView: React.FC = () => {
                 <p className="text-sm text-slate-500 font-bold">
                   {filter === 'booked' 
                     ? 'No booked appointments scheduled for this date.' 
-                    : 'No available open slots remaining for this date.'}
+                    : availability?.closed
+                      ? 'The business is closed on this date.'
+                    : !canCheckFreeTimes
+                      ? 'Free times cannot be shown right now.'
+                      : 'No free times for this date.'}
                 </p>
                 <p className="text-xs text-slate-600">Select another date or adjust the filter.</p>
               </div>
@@ -382,7 +416,7 @@ export const CalendarView: React.FC = () => {
                             </p>
                           )}
                           <p className="text-[10px] text-slate-500 mt-1">
-                            Booked At: {new Date(appointment.createdAt).toLocaleString()}
+                            Booked at: {formatDateTime(appointment.createdAt, timeZone)}
                           </p>
                         </div>
                         <button
@@ -394,16 +428,27 @@ export const CalendarView: React.FC = () => {
                         </button>
                       </div>
                     ) : (
+                      freeTimes.has(slot) && canCheckFreeTimes ? (
                       <div className="flex items-center justify-between bg-slate-950/30 hover:bg-slate-950/60 border border-dashed border-slate-800/80 rounded-xl px-4 py-3 transition-all">
-                        <span className="text-xs text-slate-500 font-semibold tracking-wide uppercase">Open Slot</span>
+                        <span className="text-xs text-emerald-400 font-semibold tracking-wide uppercase">Free</span>
                         <button
                           onClick={() => handleOpenBookModal(slot)}
                           className="flex items-center space-x-1 px-3 py-1.5 bg-slate-900 hover:bg-slate-850 text-sky-400 hover:text-sky-300 font-bold text-xs rounded-lg border border-slate-800/80 transition-colors"
                         >
-                          <Plus className="w-3.5 h-3.5" />
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
                           <span>Reserve</span>
                         </button>
                       </div>
+                      ) : (
+                      <div className="flex items-center justify-between bg-slate-950/20 border border-slate-800/50 rounded-xl px-4 py-3">
+                        <span className="text-xs text-slate-500 font-semibold tracking-wide uppercase">
+                          {canCheckFreeTimes ? 'Not available' : 'Unknown'}
+                        </span>
+                        <span className="text-[11px] text-slate-600">
+                          {canCheckFreeTimes ? 'Past, blocked in the calendar, or overlaps a booking' : 'Free times could not be read'}
+                        </span>
+                      </div>
+                      )
                     )}
                   </div>
                 </div>

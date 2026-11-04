@@ -147,6 +147,9 @@ export interface TenantBranding {
   tenantId: string;
   name: string;
   industry: string;
+  /** The zone to show times in (times are stored in UTC). */
+  timeZone: string;
+  businessHours: BusinessHours;
   branding: Record<string, unknown> | null;
   resources: Resource[];
   serviceTypes: ServiceType[];
@@ -156,8 +159,11 @@ export interface TenantBranding {
 /** Industry-specific label set. Shape mirrors `GET /api/v1/tenant/vocabulary`. */
 export interface TenantVocabularyResponse {
   tenantId: string;
-  tenantName: string;
-  industry: string;
+  tenantName: string | null;
+  industry: string | null;
+  /** The zone to show times in (times are stored in UTC). */
+  timeZone: string;
+  businessHours: BusinessHours;
   vocabulary: {
     resourceLabel: string;
     customerLabel: string;
@@ -208,6 +214,28 @@ export interface CallLog {
   createdAt: string;
   updatedAt: string;
 }
+
+/** When appointments can be offered. Days: 0 = Sunday ... 6 = Saturday. Times are 24-hour HH:MM. */
+export interface BusinessHours {
+  start: string;
+  end: string;
+  days: number[];
+}
+
+/** Free times for one date, as the server works them out (appointments plus Google Calendar). */
+export interface AvailableSlots {
+  /** The business is closed that day. */
+  closed: boolean;
+  /** The calendar could not be read, so no times could be worked out. */
+  unavailable: boolean;
+  /** The server's own sentence about the day. */
+  message: string;
+  /** Each free time: the UTC instant to book and the label to show (in the business's time zone). */
+  slots: Array<{ iso: string; label: string }>;
+}
+
+/** tenant = its own Google account, shared = the server's shared account, none = no Google account. */
+export type GoogleSource = 'tenant' | 'shared' | 'none';
 
 export const api = {
   // ── Sign-in ───────────────────────────────────────────────────────────────
@@ -353,6 +381,41 @@ export const api = {
       throw new Error(result.message);
     }
     return result.authUrl;
+  },
+
+  /**
+   * The free times for one date (YYYY-MM-DD) for the signed-in user's own business.
+   *
+   * @throws {Error} when not signed in or the server returns an error.
+   */
+  async getAvailableSlots(date: string): Promise<AvailableSlots> {
+    const user = getSessionUser();
+    if (!user) throw new Error('Please sign in.');
+    const query = `tenant_id=${encodeURIComponent(user.tenantId)}&date=${encodeURIComponent(date)}&limit=50`;
+    const res = await request(`${API_BASE_URL}/voice/check-availability?${query}`);
+    const data = await unwrap<{
+      responseText: string;
+      closed: boolean;
+      unavailable: boolean;
+      availableSlots: string[];
+      availableSlotsIso: string[];
+    }>(res);
+    return {
+      closed: data.closed,
+      unavailable: data.unavailable,
+      message: data.responseText,
+      slots: data.availableSlotsIso.map((iso, i) => ({ iso, label: data.availableSlots[i] })),
+    };
+  },
+
+  /**
+   * Which Google account the tenant's calendar uses: its own, the shared one from the server
+   * settings, or none. Read only.
+   */
+  async getGoogleStatus(): Promise<GoogleSource> {
+    const res = await request(`${API_BASE_URL}/auth/google/status`);
+    const data = await unwrap<{ source: GoogleSource }>(res);
+    return data.source;
   },
 
   // ── Tenant ────────────────────────────────────────────────────────────────

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { User, Calendar, Clock, CheckCircle2, AlertCircle, PlayCircle, XCircle, FileText, Video, Check } from 'lucide-react';
 import type { IndustryVocabulary } from '../services/vocabulary';
 import { api } from '../services/api';
+import { formatDateTime } from '../services/time';
 
 
 export interface BookingItem {
@@ -10,25 +11,25 @@ export interface BookingItem {
   customerPhone: string;
   customerEmail?: string | null;
   appointmentDateTime: string;
-  status: string; // SCHEDULED, CHECKED_IN, IN_PROGRESS, COMPLETED, CANCELLED, NO_SHOW
+  status: string;
+  /** Only shown when the data really has them (appointments do not record a provider or service yet). */
   providerName?: string;
   serviceName?: string;
-  transcriptSummary?: string;
-  telehealthUrl?: string;
 }
 
 interface StatusBoardProps {
   bookings: BookingItem[];
   vocabulary: IndustryVocabulary;
+  /** The business's time zone: times are stored in UTC and shown in this zone. */
+  timeZone: string;
   onSelectBooking?: (booking: BookingItem) => void;
-  onStatusChange?: (id: string, newStatus: string) => void;
 }
 
 export const StatusBoard: React.FC<StatusBoardProps> = ({
   bookings,
   vocabulary,
+  timeZone,
   onSelectBooking,
-  onStatusChange,
 }) => {
   const [filterStatus, setFilterStatus] = useState<string>('ALL');
   const [loadingVideoId, setLoadingVideoId] = useState<string | null>(null);
@@ -90,14 +91,26 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
             <AlertCircle className="w-3.5 h-3.5" /> No-Show
           </span>
         );
-      default:
+      case 'SCHEDULED':
         return (
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
             <Clock className="w-3.5 h-3.5" /> Scheduled
           </span>
         );
+      default:
+        // An unknown status is shown as it is, never relabelled as something it is not.
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+            {status}
+          </span>
+        );
     }
   };
+
+  // Only the statuses that really occur, and only when there is more than one to choose from.
+  const presentStatuses = [...new Set(bookings.map((b) => b.status.toUpperCase()))];
+  const showProvider = bookings.some((b) => b.providerName);
+  const showService = bookings.some((b) => b.serviceName);
 
   const filteredBookings = filterStatus === 'ALL'
     ? bookings
@@ -109,16 +122,17 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-slate-800">
         <div>
           <h2 className="text-lg font-bold text-slate-100 flex items-center gap-2">
-            <Calendar className="w-5 h-5 text-sky-400" /> Live Operational Queue
+            <Calendar className="w-5 h-5 text-sky-400" aria-hidden="true" /> Scheduled appointments
           </h2>
           <p className="text-xs text-slate-400 mt-0.5">
-            Real-time status tracking for {vocabulary.customerLabel}s and {vocabulary.resourceLabel}s
+            {bookings.length} scheduled, in time order. Times are shown in {timeZone}.
           </p>
         </div>
 
-        {/* Status Filter Pills */}
+        {/* Status filter: only when the data has more than one status */}
+        {presentStatuses.length > 1 && (
         <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-lg border border-slate-800 text-xs">
-          {['ALL', 'SCHEDULED', 'CHECKED_IN', 'IN_PROGRESS', 'COMPLETED'].map((st) => (
+          {['ALL', ...presentStatuses].map((st) => (
             <button
               key={st}
               onClick={() => setFilterStatus(st)}
@@ -131,13 +145,16 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
             </button>
           ))}
         </div>
+        )}
       </div>
 
       {/* Bookings Table */}
       {filteredBookings.length === 0 ? (
         <div className="text-center py-12 border border-dashed border-slate-800 rounded-lg">
           <Clock className="w-8 h-8 text-slate-600 mx-auto mb-2" />
-          <p className="text-sm text-slate-400">No {vocabulary.customerLabel.toLowerCase()} appointments found in this status view.</p>
+          <p className="text-sm text-slate-400">
+            {bookings.length === 0 ? 'No appointments are scheduled.' : 'No appointments with this status.'}
+          </p>
         </div>
       ) : (
         <div className="overflow-x-auto">
@@ -146,8 +163,8 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
               <tr>
                 <th className="py-3 px-4">Time</th>
                 <th className="py-3 px-4">{vocabulary.customerLabel}</th>
-                <th className="py-3 px-4">{vocabulary.resourceLabel}</th>
-                <th className="py-3 px-4">{vocabulary.serviceLabel}</th>
+                {showProvider && <th className="py-3 px-4">{vocabulary.resourceLabel}</th>}
+                {showService && <th className="py-3 px-4">{vocabulary.serviceLabel}</th>}
                 <th className="py-3 px-4">Status</th>
                 <th className="py-3 px-4 text-right">Actions</th>
               </tr>
@@ -157,7 +174,7 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
                 const dateObj = new Date(b.appointmentDateTime);
                 const timeFormatted = isNaN(dateObj.getTime())
                   ? b.appointmentDateTime
-                  : dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                  : formatDateTime(b.appointmentDateTime, timeZone);
 
                 return (
                   <tr key={b.id} className="hover:bg-slate-800/40 transition-colors group">
@@ -168,12 +185,8 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
                       <div>{b.customerName}</div>
                       <div className="text-xs text-slate-400 font-mono">{b.customerPhone}</div>
                     </td>
-                    <td className="py-3.5 px-4 text-slate-300">
-                      {b.providerName || 'Dr. Sarah Jenkins'}
-                    </td>
-                    <td className="py-3.5 px-4 text-slate-300">
-                      {b.serviceName || 'General Consultation'}
-                    </td>
+                    {showProvider && <td className="py-3.5 px-4 text-slate-300">{b.providerName ?? '—'}</td>}
+                    {showService && <td className="py-3.5 px-4 text-slate-300">{b.serviceName ?? '—'}</td>}
                     <td className="py-3.5 px-4 whitespace-nowrap">
                       {getStatusBadge(b.status)}
                     </td>
@@ -214,26 +227,13 @@ export const StatusBoard: React.FC<StatusBoardProps> = ({
                           <button
                             onClick={() => onSelectBooking(b)}
                             className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
-                            title="View Voice AI Transcript & Intake Notes"
+                            aria-label="Open appointment details"
+                            title="Open appointment details"
                           >
                             <FileText className="w-4 h-4 text-sky-400" />
                           </button>
                         )}
 
-                        {onStatusChange && (
-                          <select
-                            value={b.status.toUpperCase()}
-                            onChange={(e) => onStatusChange(b.id, e.target.value)}
-                            className="bg-slate-950 border border-slate-700 text-slate-300 text-xs rounded-lg px-2 py-1 focus:ring-1 focus:ring-sky-500 focus:outline-none"
-                          >
-                            <option value="SCHEDULED">Scheduled</option>
-                            <option value="CHECKED_IN">Check-In</option>
-                            <option value="IN_PROGRESS">Start Session</option>
-                            <option value="COMPLETED">Complete</option>
-                            <option value="NO_SHOW">No-Show</option>
-                            <option value="CANCELLED">Cancel</option>
-                          </select>
-                        )}
                       </div>
                     </td>
                   </tr>

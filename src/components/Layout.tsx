@@ -1,4 +1,6 @@
 import React from 'react';
+import { useVocabulary } from '../services/vocabulary';
+import { getSessionUser } from '../services/session';
 import { LayoutDashboard, Calendar, PhoneCall, LogOut, CalendarCheck, BarChart3, Stethoscope } from 'lucide-react';
 
 interface LayoutProps {
@@ -14,13 +16,16 @@ export const Layout: React.FC<LayoutProps> = ({
   setActiveTab,
   onLogout,
 }) => {
+  const { tenantName, error: businessError } = useVocabulary();
+  const user = getSessionUser();
+
   const menuItems = [
     { id: 'dashboard', name: 'Overview', icon: LayoutDashboard },
     { id: 'calendar', name: 'Calendar View', icon: Calendar },
-    { id: 'doctor-schedules', name: 'Doctor Schedules', icon: Stethoscope },
+    { id: 'doctor-schedules', name: 'Provider Schedules', icon: Stethoscope },
     { id: 'logs', name: 'Call Transcripts', icon: PhoneCall },
-    { id: 'book-online', name: 'Book Online', icon: CalendarCheck },
-    { id: 'analytics', name: 'Analytics SLA', icon: BarChart3 },
+    { id: 'book-online', name: 'New Booking', icon: CalendarCheck },
+    { id: 'analytics', name: 'Analytics', icon: BarChart3 },
   ];
 
 
@@ -72,8 +77,15 @@ export const Layout: React.FC<LayoutProps> = ({
         {/* Footer Tenant context & Logout */}
         <div className="p-4 border-t border-slate-800 space-y-4">
           <div className="px-4 py-3 bg-slate-950/60 rounded-xl border border-slate-800/80">
-            <p className="text-xs text-slate-500 font-semibold tracking-wider uppercase">Active Tenant</p>
-            <p className="text-sm font-medium text-slate-200 truncate mt-1">Default Dental Clinic</p>
+            <p className="text-xs text-slate-500 font-semibold tracking-wider uppercase">Business</p>
+            <p className="text-sm font-medium text-slate-200 truncate mt-1">
+              {tenantName ?? (businessError ? 'Could not load' : 'Loading…')}
+            </p>
+            {user && (
+              <p className="text-xs text-slate-500 truncate mt-1" title={user.email}>
+                {user.name || user.email} · {user.role.replace('_', ' ').toLowerCase()}
+              </p>
+            )}
           </div>
           <button
             onClick={onLogout}
@@ -92,10 +104,7 @@ export const Layout: React.FC<LayoutProps> = ({
           <h2 className="text-xl font-bold tracking-wide">
             {menuItems.find((item) => item.id === activeTab)?.name || 'Dashboard'}
           </h2>
-          <div className="flex items-center space-x-4">
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-            <span className="text-xs text-slate-400 font-medium">Inbound Agent Active</span>
-          </div>
+          {/* No "agent active" light: the app has no real way to know that, so it shows nothing. */}
         </header>
 
         {/* Page Content */}
